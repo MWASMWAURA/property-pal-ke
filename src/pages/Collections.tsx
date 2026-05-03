@@ -1,11 +1,13 @@
 import { AppShell } from "@/components/layout/AppShell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { tenants, formatKsh } from "@/lib/mock-data";
+import { formatKsh } from "@/lib/mock-data";
+import { useData } from "@/lib/data-store";
 import { StatusPill } from "./Dashboard";
 import { Download, Upload, MessageCircle } from "lucide-react";
 
 const Collections = () => {
+  const { tenants } = useData();
   const total = tenants.reduce((s,t)=>s+t.rent,0);
   const collected = tenants.filter(t=>t.status==="paid").reduce((s,t)=>s+t.rent,0);
   const overdue = tenants.filter(t=>t.status==="overdue").reduce((s,t)=>s+t.rent,0);

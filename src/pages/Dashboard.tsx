@@ -1,26 +1,48 @@
-import { TrendingUp, TrendingDown, AlertTriangle, Home, CalendarClock, Wrench, ArrowUpRight, MessageCircle, Send, Download } from "lucide-react";
+import { TrendingUp, TrendingDown, AlertTriangle, Home, CalendarClock, Wrench, ArrowUpRight, MessageCircle, Send, Download, Sparkles, RefreshCw } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { formatKsh, tenants, properties, maintenance, revenueByMonth, collectionDonut } from "@/lib/mock-data";
+import { formatKsh } from "@/lib/mock-data";
+import { useData } from "@/lib/data-store";
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
-const overdueTenants = tenants.filter(t => t.status === "overdue");
-const overdueAmount = overdueTenants.reduce((s, t) => s + t.rent, 0);
-const totalUnits = properties.reduce((s, p) => s + p.units, 0);
-const occupiedUnits = properties.reduce((s, p) => s + p.occupied, 0);
-const vacantUnits = totalUnits - occupiedUnits;
-const urgentMaint = maintenance.filter(m => m.status !== "resolved").length;
-const expiringLeases = 3;
-
 const Dashboard = () => {
+  const { tenants, properties, maintenance, revenueByMonth, collectionDonut, mode, startTour, resetToOwnData } = useData();
+
+  const overdueTenants = tenants.filter(t => t.status === "overdue");
+  const overdueAmount = overdueTenants.reduce((s, t) => s + t.rent, 0);
+  const totalUnits = properties.reduce((s, p) => s + p.units, 0);
+  const occupiedUnits = properties.reduce((s, p) => s + p.occupied, 0);
+  const vacantUnits = totalUnits - occupiedUnits;
+  const urgentMaint = maintenance.filter(m => m.status !== "resolved").length;
+  const expiringLeases = mode === "demo" ? 3 : 0;
+  const collectedTotal = collectionDonut.reduce((s, d) => s + d.value, 0);
+  const collected = collectionDonut.find(d => d.name === "Collected")?.value ?? 0;
+  const rate = collectedTotal > 0 ? (collected / collectedTotal) * 100 : 0;
+
   return (
     <AppShell title="Habari, James 👋" subtitle="Sunday, 3 May 2026 · Here's your portfolio at a glance">
+      {mode === "demo" && (
+        <Card className="p-3 sm:p-4 mb-4 border-accent/40 bg-accent/10 flex flex-col sm:flex-row items-start sm:items-center gap-3">
+          <div className="size-9 rounded-lg gradient-gold flex items-center justify-center shrink-0">
+            <Sparkles className="size-4 text-primary"/>
+          </div>
+          <div className="flex-1 text-sm">
+            <div className="font-bold">You're exploring the demo</div>
+            <div className="text-xs text-muted-foreground">Sample Nairobi properties pre-loaded. Restart the tour or switch to your own data anytime.</div>
+          </div>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <Button size="sm" variant="outline" onClick={startTour}><Sparkles className="size-3.5"/> Restart tour</Button>
+            <Button size="sm" className="gradient-primary text-primary-foreground" onClick={resetToOwnData}><RefreshCw className="size-3.5"/> Use my data</Button>
+          </div>
+        </Card>
+      )}
+
       {/* HERO KPI BAND */}
-      <section className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 animate-slide-up">
+      <section data-tour="hero-kpis" className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 animate-slide-up">
         <KpiCard
           urgent
           icon={<AlertTriangle className="size-5" />}
@@ -33,8 +55,8 @@ const Dashboard = () => {
           icon={<Home className="size-5" />}
           label="Vacant Units"
           value={`${vacantUnits}`}
-          sub={`of ${totalUnits} total · ${((vacantUnits/totalUnits)*100).toFixed(1)}% vacancy`}
-          trend="-2 vs last month"
+          sub={`of ${totalUnits} total · ${totalUnits ? ((vacantUnits/totalUnits)*100).toFixed(1) : "0"}% vacancy`}
+          trend={mode === "demo" ? "-2 vs last month" : undefined}
           trendUp
         />
         <KpiCard
@@ -55,16 +77,16 @@ const Dashboard = () => {
 
       {/* CHARTS ROW */}
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <Card className="lg:col-span-2 p-5 sm:p-6 shadow-card border-border/60">
+        <Card data-tour="revenue" className="lg:col-span-2 p-5 sm:p-6 shadow-card border-border/60">
           <div className="flex items-start justify-between mb-5">
             <div>
               <h2 className="font-bold text-lg">Revenue Trend</h2>
               <p className="text-xs text-muted-foreground">Last 6 months · KSh</p>
             </div>
             <div className="text-right">
-              <div className="text-2xl font-bold font-mono-num">{formatKsh(2240000)}</div>
+              <div className="text-2xl font-bold font-mono-num">{formatKsh(collected)}</div>
               <div className="flex items-center gap-1 text-xs text-success font-semibold justify-end">
-                <TrendingUp className="size-3.5"/> +12.4% YoY
+                <TrendingUp className="size-3.5"/> {mode === "demo" ? "+12.4% YoY" : "Live"}
               </div>
             </div>
           </div>
@@ -83,31 +105,31 @@ const Dashboard = () => {
           </ResponsiveContainer>
         </Card>
 
-        <Card className="p-5 sm:p-6 shadow-card border-border/60">
+        <Card data-tour="collection" className="p-5 sm:p-6 shadow-card border-border/60 flex flex-col">
           <div className="flex items-start justify-between mb-3">
             <div>
               <h2 className="font-bold text-lg">Collection Rate</h2>
               <p className="text-xs text-muted-foreground">This month</p>
             </div>
-            <Badge className="bg-success/15 text-success hover:bg-success/15 border-0 font-semibold">95.4%</Badge>
+            <Badge className="bg-success/15 text-success hover:bg-success/15 border-0 font-semibold">{rate.toFixed(1)}%</Badge>
           </div>
-          <div className="relative">
-            <ResponsiveContainer width="100%" height={200}>
+          <div className="relative mx-auto w-full" style={{ maxWidth: 180, height: 140 }}>
+            <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={collectionDonut} dataKey="value" innerRadius={62} outerRadius={88} paddingAngle={3} stroke="none">
+                <Pie data={collectionDonut} dataKey="value" innerRadius={48} outerRadius={66} paddingAngle={3} stroke="none">
                   {collectionDonut.map((d) => <Cell key={d.name} fill={d.color}/>)}
                 </Pie>
               </PieChart>
             </ResponsiveContainer>
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <div className="text-2xl font-bold font-mono-num">{formatKsh(2240000)}</div>
-              <div className="text-[11px] text-muted-foreground uppercase tracking-wider">Collected</div>
+              <div className="text-base font-bold font-mono-num leading-tight">{formatKsh(collected)}</div>
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Collected</div>
             </div>
           </div>
-          <div className="space-y-2 mt-3">
+          <div className="space-y-1.5 mt-3">
             {collectionDonut.map(d => (
-              <div key={d.name} className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2"><span className="size-2.5 rounded-full" style={{background: d.color}}/>{d.name}</div>
+              <div key={d.name} className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2"><span className="size-2 rounded-full" style={{background: d.color}}/>{d.name}</div>
                 <span className="font-mono-num font-semibold">{formatKsh(d.value)}</span>
               </div>
             ))}
@@ -128,39 +150,45 @@ const Dashboard = () => {
             </Link>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-xs uppercase tracking-wider text-muted-foreground">
-                <tr>
-                  <th className="text-left font-semibold px-5 py-3">Tenant</th>
-                  <th className="text-left font-semibold px-5 py-3 hidden sm:table-cell">Unit</th>
-                  <th className="text-right font-semibold px-5 py-3">Rent</th>
-                  <th className="text-left font-semibold px-5 py-3 hidden md:table-cell">Method</th>
-                  <th className="text-left font-semibold px-5 py-3">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tenants.slice(0,6).map(t => (
-                  <tr key={t.id} className="border-t border-border hover:bg-muted/30 transition-colors">
-                    <td className="px-5 py-3.5">
-                      <div className="font-semibold">{t.name}</div>
-                      <div className="text-xs text-muted-foreground sm:hidden">{t.unit} · {t.property}</div>
-                    </td>
-                    <td className="px-5 py-3.5 hidden sm:table-cell">
-                      <div className="font-medium">{t.unit}</div>
-                      <div className="text-xs text-muted-foreground">{t.property}</div>
-                    </td>
-                    <td className="px-5 py-3.5 text-right font-mono-num font-semibold">{formatKsh(t.rent)}</td>
-                    <td className="px-5 py-3.5 hidden md:table-cell text-muted-foreground">{t.method}</td>
-                    <td className="px-5 py-3.5"><StatusPill status={t.status}/></td>
+            {tenants.length === 0 ? (
+              <div className="p-10 text-center text-sm text-muted-foreground">
+                No tenants yet — add your first tenant to start tracking collections.
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40 text-xs uppercase tracking-wider text-muted-foreground">
+                  <tr>
+                    <th className="text-left font-semibold px-5 py-3">Tenant</th>
+                    <th className="text-left font-semibold px-5 py-3 hidden sm:table-cell">Unit</th>
+                    <th className="text-right font-semibold px-5 py-3">Rent</th>
+                    <th className="text-left font-semibold px-5 py-3 hidden md:table-cell">Method</th>
+                    <th className="text-left font-semibold px-5 py-3">Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {tenants.slice(0,6).map(t => (
+                    <tr key={t.id} className="border-t border-border hover:bg-muted/30 transition-colors">
+                      <td className="px-5 py-3.5">
+                        <div className="font-semibold">{t.name}</div>
+                        <div className="text-xs text-muted-foreground sm:hidden">{t.unit} · {t.property}</div>
+                      </td>
+                      <td className="px-5 py-3.5 hidden sm:table-cell">
+                        <div className="font-medium">{t.unit}</div>
+                        <div className="text-xs text-muted-foreground">{t.property}</div>
+                      </td>
+                      <td className="px-5 py-3.5 text-right font-mono-num font-semibold">{formatKsh(t.rent)}</td>
+                      <td className="px-5 py-3.5 hidden md:table-cell text-muted-foreground">{t.method}</td>
+                      <td className="px-5 py-3.5"><StatusPill status={t.status}/></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </Card>
 
         <div className="space-y-4">
-          <Card className="p-5 shadow-card border-border/60 gradient-hero text-white relative overflow-hidden">
+          <Card data-tour="whatsapp" className="p-5 shadow-card border-border/60 gradient-hero text-white relative overflow-hidden">
             <div className="absolute -right-8 -top-8 size-32 rounded-full bg-white/10 blur-2xl"/>
             <div className="relative">
               <div className="flex items-center gap-2 mb-1">

@@ -1,11 +1,13 @@
 import { AppShell } from "@/components/layout/AppShell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { maintenance } from "@/lib/mock-data";
+import { useData } from "@/lib/data-store";
 import { StatusPill } from "./Dashboard";
 import { Wrench, Clock } from "lucide-react";
 
-const Maintenance = () => (
+const Maintenance = () => {
+  const { maintenance } = useData();
+  return (
   <AppShell title="Maintenance" subtitle="Tenant complaints & repair requests">
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
       {(["pending","in_progress","resolved"] as const).map(col => (
@@ -46,5 +48,6 @@ const Maintenance = () => (
       ))}
     </div>
   </AppShell>
-);
+  );
+};
 export default Maintenance;
