@@ -64,7 +64,8 @@ const Messages = () => {
       </Card>
     </div>
   </AppShell>
-);
+  );
+};
 
 const Bubble = ({ side, children }: { side: "in"|"out"; children: React.ReactNode }) => (
   <div className={`flex ${side === "out" ? "justify-end" : "justify-start"}`}>
