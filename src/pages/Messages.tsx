@@ -2,10 +2,12 @@ import { AppShell } from "@/components/layout/AppShell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { messages } from "@/lib/mock-data";
+import { useData } from "@/lib/data-store";
 import { Send, Paperclip, Search, MessageCircle, Users, AlertCircle } from "lucide-react";
 
-const Messages = () => (
+const Messages = () => {
+  const { messages } = useData();
+  return (
   <AppShell title="WhatsApp Hub" subtitle="Messages, broadcasts & tenant commands">
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
       <QuickStat icon={<MessageCircle className="size-4"/>} label="Active threads" value="12"/>
