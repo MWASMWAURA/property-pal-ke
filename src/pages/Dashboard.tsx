@@ -62,10 +62,18 @@ const Dashboard = () => {
         />
         <KpiCard
           icon={<CalendarClock className="size-5" />}
-          label="Expiring Leases"
+          label={`Expiring Leases (${leaseFilterDays}d)`}
           value={`${expiringLeases}`}
-          sub="Within next 30 days"
-          trend="Renewal window"
+          sub={expiring.slice(0,2).map(t => t.name).join(", ") || "None in window"}
+          action={
+            <select
+              value={leaseFilterDays}
+              onChange={e => setLeaseFilterDays(+e.target.value)}
+              className="text-[11px] bg-muted/60 border border-border rounded px-2 py-1 font-semibold cursor-pointer"
+            >
+              {[7,14,30,60,90,180].map(d => <option key={d} value={d}>Next {d} days</option>)}
+            </select>
+          }
         />
         <KpiCard
           icon={<Wrench className="size-5" />}
