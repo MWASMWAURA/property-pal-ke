@@ -4,13 +4,23 @@ import { Button } from "@/components/ui/button";
 import { formatKsh } from "@/lib/mock-data";
 import { useData } from "@/lib/data-store";
 import { StatusPill } from "./Dashboard";
-import { Download, Upload, MessageCircle } from "lucide-react";
+import { Download, MessageCircle, Plus } from "lucide-react";
+import { RecordPaymentDialog } from "@/components/dialogs/RecordPaymentDialog";
+import { BulkImportDialog } from "@/components/dialogs/BulkImportDialog";
+import { toast } from "@/hooks/use-toast";
 
 const Collections = () => {
-  const { tenants } = useData();
-  const total = tenants.reduce((s,t)=>s+t.rent,0);
-  const collected = tenants.filter(t=>t.status==="paid").reduce((s,t)=>s+t.rent,0);
-  const overdue = tenants.filter(t=>t.status==="overdue").reduce((s,t)=>s+t.rent,0);
+  const { tenants, sendWhatsApp } = useData();
+  const total = tenants.reduce((s, t) => s + t.rent, 0);
+  const collected = tenants.filter(t => t.status === "paid").reduce((s, t) => s + t.rent, 0);
+  const overdue = tenants.filter(t => t.status === "overdue").reduce((s, t) => s + t.rent, 0);
+
+  const bulkRemind = () => {
+    const overdueT = tenants.filter(t => t.status === "overdue");
+    overdueT.forEach(t => sendWhatsApp(t.id, `Hi ${t.name}, your rent of ${formatKsh(t.rent)} is overdue. Kindly settle ASAP. Reply BALANCE for details.`, "landlord"));
+    toast({ title: "Bulk reminder sent", description: `${overdueT.length} overdue tenants notified via WhatsApp.` });
+  };
+
   return (
     <AppShell title="Collections" subtitle="Track rent payments across all properties">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
@@ -31,10 +41,10 @@ const Collections = () => {
       <Card className="shadow-card border-border/60 overflow-hidden">
         <div className="p-4 border-b border-border flex flex-wrap items-center gap-2 justify-between">
           <h2 className="font-bold">All Payments</h2>
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline"><Upload className="size-3.5"/> Import Excel</Button>
-            <Button size="sm" variant="outline"><Download className="size-3.5"/> Export</Button>
-            <Button size="sm" className="gradient-primary text-primary-foreground"><MessageCircle className="size-3.5"/> Bulk Remind</Button>
+          <div className="flex flex-wrap gap-2">
+            <BulkImportDialog trigger={<Button size="sm" variant="outline"><Download className="size-3.5" /> Bulk Import</Button>} />
+            <Button size="sm" variant="outline" onClick={bulkRemind}><MessageCircle className="size-3.5" /> Bulk Remind</Button>
+            <RecordPaymentDialog trigger={<Button size="sm" className="gradient-primary text-primary-foreground"><Plus className="size-3.5" /> Record Payment</Button>} />
           </div>
         </div>
         <div className="overflow-x-auto">
