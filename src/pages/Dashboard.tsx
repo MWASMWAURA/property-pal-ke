@@ -10,7 +10,7 @@ import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 const Dashboard = () => {
-  const { tenants, properties, maintenance, revenueByMonth, collectionDonut, mode, startTour, resetToOwnData } = useData();
+  const { tenants, properties, maintenance, revenueByMonth, collectionDonut, mode, startTour, resetToOwnData, leaseFilterDays, setLeaseFilterDays, expiringTenants } = useData();
 
   const overdueTenants = tenants.filter(t => t.status === "overdue");
   const overdueAmount = overdueTenants.reduce((s, t) => s + t.rent, 0);
@@ -18,7 +18,8 @@ const Dashboard = () => {
   const occupiedUnits = properties.reduce((s, p) => s + p.occupied, 0);
   const vacantUnits = totalUnits - occupiedUnits;
   const urgentMaint = maintenance.filter(m => m.status !== "resolved").length;
-  const expiringLeases = mode === "demo" ? 3 : 0;
+  const expiring = expiringTenants();
+  const expiringLeases = expiring.length;
   const collectedTotal = collectionDonut.reduce((s, d) => s + d.value, 0);
   const collected = collectionDonut.find(d => d.name === "Collected")?.value ?? 0;
   const rate = collectedTotal > 0 ? (collected / collectedTotal) * 100 : 0;
