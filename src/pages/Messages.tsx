@@ -81,7 +81,7 @@ const Messages = () => {
   const selectedTenant = tenants.find(t => t.id === selectedId);
   const thread = useMemo(() => {
     const local = waMessages.filter(m => m.tenantId === selectedId);
-    const server = (serverThreads[selectedId] || []).map((m: any) => ({
+    const server = (Array.isArray(serverThreads[selectedId]) ? serverThreads[selectedId] : []).map((m: any) => ({
       id: m.id,
       tenantId: m.tenant_id,
       direction: m.direction as 'in' | 'out',

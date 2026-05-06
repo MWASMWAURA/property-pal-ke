@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Download, FileBarChart, TrendingUp, Home, Receipt, Wrench } from "lucide-react";
 import { useData } from "@/lib/data-store";
 import { toast } from "@/hooks/use-toast";
@@ -42,6 +43,7 @@ const downloadCSV = (filename: string, csvContent: string) => {
 const Reports = () => {
   const { tenants, payments, complaints, maintenance, properties } = useData();
   const [previewing, setPreviewing] = useState<string | null>(null);
+  const [previewData, setPreviewData] = useState<{ name: string; data: string[][] } | null>(null);
 
   // Report generation functions
   const generateCollectionsReport = () => {
@@ -161,13 +163,50 @@ const Reports = () => {
 
   const handlePreview = (reportName: string) => {
     setPreviewing(reportName);
-    // Simulate loading
+
+    // Generate report data
+    let csvContent = '';
+    switch (reportName) {
+      case 'Collections Report':
+        csvContent = generateCollectionsReport();
+        break;
+      case 'Occupancy Report':
+        csvContent = generateOccupancyReport();
+        break;
+      case 'Revenue Statement':
+        csvContent = generateRevenueStatement();
+        break;
+      case 'Maintenance Log':
+        csvContent = generateMaintenanceLog();
+        break;
+      case 'Tenant Aging Report':
+        csvContent = generateTenantAgingReport();
+        break;
+      case 'Bank Reconciliation':
+        csvContent = generateBankReconciliation();
+        break;
+      default:
+        return;
+    }
+
+    // Parse CSV to display format
+    const lines = csvContent.trim().split('\n');
+    if (lines.length === 0) {
+      toast({
+        title: "No data available",
+        description: "This report contains no data to preview",
+        variant: "destructive",
+      });
+      setPreviewing(null);
+      return;
+    }
+
+    const headers = lines[0].split(',');
+    const rows = lines.slice(1).map(line => line.split(','));
+
     setTimeout(() => {
       setPreviewing(null);
-      toast({
-        title: "Preview generated",
-        description: `${reportName} preview ready for viewing`,
-      });
+      setPreviewData({ name: reportName, data: [headers, ...rows] });
     }, 1000);
   };
 
@@ -274,6 +313,46 @@ const Reports = () => {
           </Card>
         ))}
       </div>
+
+      {/* Preview Dialog */}
+      <Dialog open={!!previewData} onOpenChange={() => setPreviewData(null)}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle>{previewData?.name} Preview</DialogTitle>
+          </DialogHeader>
+          {previewData && (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse border border-border text-sm">
+                <thead>
+                  <tr className="bg-muted">
+                    {previewData.data[0].map((header, i) => (
+                      <th key={i} className="border border-border px-3 py-2 text-left font-semibold">
+                        {header.replace(/"/g, '')}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {previewData.data.slice(1).map((row, i) => (
+                    <tr key={i} className="hover:bg-muted/50">
+                      {row.map((cell, j) => (
+                        <td key={j} className="border border-border px-3 py-2">
+                          {cell.replace(/"/g, '')}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {previewData.data.length <= 1 && (
+                <p className="text-center text-muted-foreground py-8">
+                  No data available for this report.
+                </p>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 };

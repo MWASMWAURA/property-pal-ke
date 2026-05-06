@@ -9,9 +9,9 @@ import { Building2, Sparkles, Rocket, CheckCircle2, MessageCircle } from "lucide
 import { cn } from "@/lib/utils";
 
 export const OnboardingDialog = () => {
-  const { needsOnboarding, setNeedsOnboarding, saveProfile, startDemo, startFresh } = useData();
+  const { needsOnboarding, setNeedsOnboarding, saveProfile, startDemo, startFresh, profile: currentProfile } = useData();
   const [step, setStep] = useState(0);
-  const [profile, setProfile] = useState<LandlordProfile>({
+  const [profile, setProfile] = useState<LandlordProfile>(currentProfile || {
     name: "", email: "", phone: "", company: "", city: "Nairobi", preferredChannel: "whatsapp", collectionMonthStart: 1,
   });
 

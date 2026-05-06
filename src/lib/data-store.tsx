@@ -4,9 +4,7 @@ import {
   properties as seedProperties,
   tenants as seedTenants,
   maintenance as seedMaintenance,
-  messages as seedMessages,
-  revenueByMonth as seedRevenue,
-  collectionDonut as seedDonut,
+  payments as seedPayments,
   formatKsh,
   TenantStatus,
 } from "./mock-data";
@@ -58,21 +56,26 @@ export type WaMessage = {
   channel: "bot" | "landlord";
 };
 
+
+
+type Mode = "demo" | "live" | "unset";
+
 export type LandlordProfile = {
+  id: string;
   name: string;
   email: string;
   phone: string;
   company: string;
   city: string;
   preferredChannel: "whatsapp" | "sms" | "email";
-  collectionMonthStart: number; // Day of month when collection period starts (1-31)
+  collectionMonthStart: number;
 };
-
-type Mode = "demo" | "live" | "unset";
 
 type Ctx = {
   mode: Mode;
   profile: LandlordProfile | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
   properties: Property[];
   tenants: Tenant[];
   maintenance: typeof seedMaintenance;
@@ -120,6 +123,12 @@ type Ctx = {
   tourActive: boolean;
   startTour: () => void;
   stopTour: () => void;
+
+  // Authentication methods
+  register: (data: { name: string; email: string; phone?: string; company?: string; city?: string; password: string; preferredChannel?: string; collectionMonthStart?: number }) => Promise<{ landlord: LandlordProfile; token: string }>;
+  login: (email: string, password: string) => Promise<{ landlord: LandlordProfile; token: string }>;
+  logout: () => void;
+  loadProfile: () => Promise<void>;
 };
 
 const DataCtx = createContext<Ctx | null>(null);
@@ -153,6 +162,8 @@ const parseDMY = (s: string): Date | null => {
 export const DataProvider = ({ children }: { children: ReactNode }) => {
   const [mode, setMode] = useState<Mode>("unset");
   const [profile, setProfile] = useState<LandlordProfile | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [properties, setProperties] = useState<Property[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -164,14 +175,102 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   const [tourActive, setTourActive] = useState(false);
   const [leaseFilterDays, setLeaseFilterDays] = useState(30);
 
-  // Hydrate
+  // Authentication methods (inside component so they can access state setters)
+  const register = async (data: Parameters<Ctx["register"]>[0]): Promise<ReturnType<Ctx["register"]>> => {
+    const response = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error);
+
+    // Store token and profile
+    localStorage.setItem('auth_token', result.token);
+    setProfile(result.landlord);
+    setIsAuthenticated(true);
+    setMode('live');
+    setNeedsOnboarding(true);
+
+    return result;
+  };
+
+  const login = async (email: string, password: string): Promise<ReturnType<Ctx["login"]>> => {
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error);
+
+    // Store token and profile
+    localStorage.setItem('auth_token', result.token);
+    setProfile(result.landlord);
+    setIsAuthenticated(true);
+    setMode('live');
+    setNeedsOnboarding(false);
+
+    return result;
+  };
+
+  const logout = () => {
+    localStorage.removeItem('auth_token');
+    setProfile(null);
+    setIsAuthenticated(false);
+    setMode('unset');
+    setProperties([]);
+    setTenants([]);
+    setPayments([]);
+    setComplaints([]);
+    setNotifications([]);
+    setWaMessages([]);
+  };
+
+  const loadProfile = async (): Promise<void> => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/auth/me', {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const result = await response.json();
+
+      if (response.ok) {
+        setProfile(result);
+        setIsAuthenticated(true);
+        setMode('live');
+      } else {
+        // Token invalid, clear it
+        localStorage.removeItem('auth_token');
+        setIsAuthenticated(false);
+      }
+    } catch (error) {
+      console.error('Failed to load profile:', error);
+      localStorage.removeItem('auth_token');
+      setIsAuthenticated(false);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Load authentication and profile
   useEffect(() => {
+    loadProfile();
+  }, []);
+
+  // Hydrate other data (only after authentication)
+  useEffect(() => {
+    if (!isAuthenticated || isLoading) return;
+
     try {
       const raw = localStorage.getItem(KEY);
       if (raw) {
         const s = JSON.parse(raw);
-        setMode(s.mode ?? "unset");
-        setProfile(s.profile ?? null);
         setProperties(s.properties ?? []);
         setTenants(s.tenants ?? []);
         setPayments(s.payments ?? []);
@@ -179,14 +278,11 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         setComplaints(s.complaints ?? []);
         setNotifications(s.notifications ?? []);
         setWaMessages(s.waMessages ?? []);
-        if (s.mode === "unset" || !s.profile) setNeedsOnboarding(true);
-      } else {
-        setNeedsOnboarding(true);
       }
-    } catch {
-      setNeedsOnboarding(true);
+    } catch (error) {
+      console.error('Failed to load local data:', error);
     }
-  }, []);
+  }, [isAuthenticated, isLoading]);
 
   // Persist
   useEffect(() => {
@@ -294,7 +390,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     setProperties(seedProperties);
     setTenants(seedTenants);
     setMaintenance(seedMaintenance);
-    setPayments([]);
+    setPayments(seedPayments);
     setComplaints([]);
     setNotifications([
       { id: uid("n"), type: "system", title: "Welcome to the demo", body: "Sample Nairobi tenants pre-loaded.", createdAt: new Date().toISOString(), read: false },
@@ -337,7 +433,34 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     setMode("live"); setTourActive(false);
   };
 
-  const saveProfile = (p: LandlordProfile) => setProfile(p);
+  const saveProfile = async (p: LandlordProfile) => {
+    try {
+      const response = await fetch('/api/auth/me', {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(p),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update profile');
+      }
+
+      setProfile(p);
+    } catch (error) {
+      console.error('Failed to save profile:', error);
+      // Still update local state for offline functionality
+      setProfile(p);
+    }
+  };
+
+  // Helper function for auth headers
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('auth_token');
+    return {
+      'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    };
+  };
 
   const addTenant: Ctx["addTenant"] = (t) => {
     const tenant = { ...t, id: uid("t") } as Tenant;
@@ -618,7 +741,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   const value = useMemo<Ctx>(() => {
     const isDemo = mode === "demo";
     return {
-      mode, profile, properties, tenants,
+      mode, profile, isAuthenticated, isLoading, properties, tenants,
       maintenance,
       messages: isDemo ? seedMessages : [],
       revenueByMonth: isDemo ? seedRevenue : calculateRevenueByMonth(),
@@ -638,8 +761,9 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       startDemo, startFresh, resetToOwnData,
       needsOnboarding, setNeedsOnboarding,
       tourActive, startTour: () => setTourActive(true), stopTour: () => setTourActive(false),
+      register, login, logout, loadProfile,
     };
-  }, [mode, profile, properties, tenants, payments, complaints, notifications, waMessages, leaseFilterDays, needsOnboarding, tourActive, expiringTenants, botProcess, calculateRevenueByMonth]);
+  }, [mode, profile, isAuthenticated, isLoading, properties, tenants, payments, complaints, notifications, waMessages, leaseFilterDays, needsOnboarding, tourActive, expiringTenants, botProcess, calculateRevenueByMonth]);
 
   return <DataCtx.Provider value={value}>{children}</DataCtx.Provider>;
 };

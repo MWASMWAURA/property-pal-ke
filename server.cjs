@@ -139,13 +139,66 @@ if (process.env.DATABASE_URL) {
     };
 }
 
+// JWT and bcrypt for authentication
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+
+// JWT secret - in production, use environment variable
+const JWT_SECRET = process.env.JWT_SECRET || 'propertyhub_kenya_secret_2026';
+
+// Authentication middleware
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+
+    if (!token) {
+        return res.status(401).json({ error: 'Access token required' });
+    }
+
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) {
+            return res.status(403).json({ error: 'Invalid or expired token' });
+        }
+        req.landlord = user;
+        next();
+    });
+};
+
+// Generate JWT token
+const generateToken = (landlord) => {
+    return jwt.sign(
+        {
+            id: landlord.id,
+            email: landlord.email,
+            name: landlord.name
+        },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+    );
+};
+
 const initDatabase = async () => {
     try {
         if (db.constructor.name === 'Database') {
-            // SQLite initialization
+            // SQLite initialization with landlord_id
             db.exec(`
+                CREATE TABLE IF NOT EXISTS landlords (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    email TEXT UNIQUE NOT NULL,
+                    phone TEXT,
+                    company TEXT,
+                    city TEXT,
+                    preferred_channel TEXT DEFAULT 'whatsapp',
+                    collection_month_start INTEGER DEFAULT 1,
+                    password_hash TEXT NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE TABLE IF NOT EXISTS properties (
                     id TEXT PRIMARY KEY,
+                    landlord_id TEXT NOT NULL,
                     name TEXT,
                     address TEXT,
                     type TEXT,
@@ -155,11 +208,13 @@ const initDatabase = async () => {
                     units TEXT,
                     recurringbills TEXT,
                     createdat TEXT,
-                    updatedat TEXT
+                    updatedat TEXT,
+                    FOREIGN KEY (landlord_id) REFERENCES landlords(id)
                 );
 
                 CREATE TABLE IF NOT EXISTS tenants (
                     id TEXT PRIMARY KEY,
+                    landlord_id TEXT NOT NULL,
                     name TEXT,
                     phone TEXT,
                     unit TEXT,
@@ -170,11 +225,13 @@ const initDatabase = async () => {
                     due_date TEXT,
                     lease_end TEXT,
                     assigned_unit TEXT,
-                    created_at TEXT
+                    created_at TEXT,
+                    FOREIGN KEY (landlord_id) REFERENCES landlords(id)
                 );
 
                 CREATE TABLE IF NOT EXISTS payments (
                     id TEXT PRIMARY KEY,
+                    landlord_id TEXT NOT NULL,
                     tenant_id TEXT,
                     tenant_name TEXT,
                     amount INTEGER,
@@ -185,11 +242,13 @@ const initDatabase = async () => {
                     created_at TEXT,
                     status TEXT,
                     due_date TEXT,
-                    property_id TEXT
+                    property_id TEXT,
+                    FOREIGN KEY (landlord_id) REFERENCES landlords(id)
                 );
 
                 CREATE TABLE IF NOT EXISTS complaints (
                     id TEXT PRIMARY KEY,
+                    landlord_id TEXT NOT NULL,
                     tenant_id TEXT,
                     tenant_name TEXT,
                     unit TEXT,
@@ -199,11 +258,13 @@ const initDatabase = async () => {
                     priority TEXT,
                     status TEXT,
                     source TEXT,
-                    created_at TEXT
+                    created_at TEXT,
+                    FOREIGN KEY (landlord_id) REFERENCES landlords(id)
                 );
 
                 CREATE TABLE IF NOT EXISTS wa_messages (
                     id TEXT PRIMARY KEY,
+                    landlord_id TEXT NOT NULL,
                     tenant_id TEXT,
                     direction TEXT,
                     body TEXT,
@@ -212,11 +273,13 @@ const initDatabase = async () => {
                     meta_message_id TEXT,
                     from_phone TEXT,
                     to_phone TEXT,
-                    status TEXT
+                    status TEXT,
+                    FOREIGN KEY (landlord_id) REFERENCES landlords(id)
                 );
 
                 CREATE TABLE IF NOT EXISTS notifications (
                     id TEXT PRIMARY KEY,
+                    landlord_id TEXT NOT NULL,
                     type TEXT,
                     title TEXT,
                     body TEXT,
@@ -225,15 +288,33 @@ const initDatabase = async () => {
                     recipient TEXT,
                     message TEXT,
                     sentat TEXT,
-                    status TEXT
+                    status TEXT,
+                    FOREIGN KEY (landlord_id) REFERENCES landlords(id)
                 );
             `);
-            console.log('✅ SQLite database tables created/verified');
+            console.log('✅ SQLite database tables created/verified with landlord support');
         } else {
-            // PostgreSQL initialization
+            // PostgreSQL initialization with landlord_id
+            await db.query(`
+                CREATE TABLE IF NOT EXISTS landlords (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    email TEXT UNIQUE NOT NULL,
+                    phone TEXT,
+                    company TEXT,
+                    city TEXT,
+                    preferred_channel TEXT DEFAULT 'whatsapp',
+                    collection_month_start INTEGER DEFAULT 1,
+                    password_hash TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                );
+            `);
+
             await db.query(`
                 CREATE TABLE IF NOT EXISTS properties (
                     id TEXT PRIMARY KEY,
+                    landlord_id TEXT NOT NULL REFERENCES landlords(id),
                     name TEXT,
                     address TEXT,
                     type TEXT,
@@ -250,6 +331,7 @@ const initDatabase = async () => {
             await db.query(`
                 CREATE TABLE IF NOT EXISTS tenants (
                     id TEXT PRIMARY KEY,
+                    landlord_id TEXT NOT NULL REFERENCES landlords(id),
                     name TEXT,
                     phone TEXT,
                     unit TEXT,
@@ -267,6 +349,7 @@ const initDatabase = async () => {
             await db.query(`
                 CREATE TABLE IF NOT EXISTS payments (
                     id TEXT PRIMARY KEY,
+                    landlord_id TEXT NOT NULL REFERENCES landlords(id),
                     tenant_id TEXT,
                     tenant_name TEXT,
                     amount INTEGER,
@@ -284,6 +367,7 @@ const initDatabase = async () => {
             await db.query(`
                 CREATE TABLE IF NOT EXISTS complaints (
                     id TEXT PRIMARY KEY,
+                    landlord_id TEXT NOT NULL REFERENCES landlords(id),
                     tenant_id TEXT,
                     tenant_name TEXT,
                     unit TEXT,
@@ -300,6 +384,7 @@ const initDatabase = async () => {
             await db.query(`
                 CREATE TABLE IF NOT EXISTS wa_messages (
                     id TEXT PRIMARY KEY,
+                    landlord_id TEXT NOT NULL REFERENCES landlords(id),
                     tenant_id TEXT,
                     direction TEXT,
                     body TEXT,
@@ -315,6 +400,7 @@ const initDatabase = async () => {
             await db.query(`
                 CREATE TABLE IF NOT EXISTS notifications (
                     id TEXT PRIMARY KEY,
+                    landlord_id TEXT NOT NULL REFERENCES landlords(id),
                     type TEXT,
                     title TEXT,
                     body TEXT,
@@ -327,7 +413,7 @@ const initDatabase = async () => {
                 );
             `);
 
-            console.log('✅ PostgreSQL database tables created/verified');
+            console.log('✅ PostgreSQL database tables created/verified with landlord support');
         }
     } catch (error) {
         console.error('❌ Database initialization failed:', error);
@@ -335,7 +421,11 @@ const initDatabase = async () => {
     }
 };
 
-initDatabase();
+// Initialize database and load data
+(async () => {
+  await initDatabase();
+  await loadDatabaseData();
+})();
 
 const loadJson = (value, fallback) => {
   if (value == null) return fallback;
@@ -545,12 +635,29 @@ const persistNotification = (notification) => db.prepare(
   status: notification.status || 'sent'
 });
 
-let properties = db.prepare('SELECT * FROM properties').all().map(normalizePropertyRow);
-let tenants = db.prepare('SELECT * FROM tenants').all().map(normalizeTenantRow);
-let payments = db.prepare('SELECT * FROM payments').all().map(normalizePaymentRow);
-let complaints = db.prepare('SELECT * FROM complaints').all().map(normalizeComplaintRow);
-let whatsappMessages = db.prepare('SELECT * FROM wa_messages').all().map(normalizeWaMessageRow);
-let notifications = db.prepare('SELECT * FROM notifications').all().map(normalizeNotificationRow);
+// Initialize in-memory arrays (will be populated from database after init)
+let properties = [];
+let tenants = [];
+let payments = [];
+let complaints = [];
+let whatsappMessages = [];
+let notifications = [];
+
+// Load data from database after initialization
+const loadDatabaseData = async () => {
+  try {
+    console.log('📥 Loading data from database...');
+    properties = (await queryAll('SELECT * FROM properties')).map(normalizePropertyRow);
+    tenants = (await queryAll('SELECT * FROM tenants')).map(normalizeTenantRow);
+    payments = (await queryAll('SELECT * FROM payments')).map(normalizePaymentRow);
+    complaints = (await queryAll('SELECT * FROM complaints')).map(normalizeComplaintRow);
+    whatsappMessages = (await queryAll('SELECT * FROM wa_messages')).map(normalizeWaMessageRow);
+    notifications = (await queryAll('SELECT * FROM notifications')).map(normalizeNotificationRow);
+    console.log(`✅ Loaded ${properties.length} properties, ${tenants.length} tenants, ${payments.length} payments, ${complaints.length} complaints`);
+  } catch (error) {
+    console.log('⚠️  Database load failed, using empty arrays:', error.message);
+  }
+};
 
 // New data models for enhanced features
 let maintenanceRequests = [];
@@ -943,7 +1050,7 @@ function normalizePhoneForSearch(phone) {
 async function findTenantByPhone(phone) {
   const normalized = normalizePhoneForSearch(phone);
 
-  // Query database directly (since we're using persistent storage now)
+  // Query database for any tenant with this phone number (we'll match landlord later if needed)
   try {
     const result = await queryOne(
       `SELECT * FROM tenants WHERE replace(replace(phone,' ',''),'+','') = $1`,
@@ -1432,12 +1539,17 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
                           // Save as complaint/maintenance record for landlord to address
                           const complaintId = generateId();
                           const category = isMaintenance ? 'Maintenance' : 'General';
+
+                          // Get landlord_id from tenant record
+                          const landlordId = tenant?.landlord_id || 'unknown';
+
                           try {
                             await query(
-                              `INSERT INTO complaints (id, tenant_id, tenant_name, unit, property, category, description, priority, status, source, created_at)
-                               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                              `INSERT INTO complaints (id, landlord_id, tenant_id, tenant_name, unit, property, category, description, priority, status, source, created_at)
+                               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
                               [
                                 complaintId,
+                                landlordId,
                                 tenant?.id || from,
                                 tenant?.name || 'Unknown Tenant',
                                 tenant?.unit || 'N/A',
@@ -1450,7 +1562,7 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
                                 new Date().toISOString()
                               ]
                             );
-                            console.log('Inserted complaint:', complaintId, 'for tenant:', tenant?.name || from);
+                            console.log('Inserted complaint:', complaintId, 'for landlord:', landlordId, 'tenant:', tenant?.name || from);
                           } catch (error) {
                             console.error('Error inserting complaint:', error);
                           }
@@ -1840,12 +1952,13 @@ app.get('/api/sync/payments', (req, res) => {
     res.json(rows);
 });
 
-app.get('/api/sync/complaints', async (req, res) => {
+// Get complaints for authenticated landlord
+app.get('/api/sync/complaints', authenticateToken, async (req, res) => {
     try {
-        const rawRows = await queryAll('SELECT * FROM complaints ORDER BY created_at DESC');
-        console.log('Raw complaints from DB:', rawRows.length);
+        const landlordId = req.landlord.id;
+        const rawRows = await queryAll('SELECT * FROM complaints WHERE landlord_id = $1 ORDER BY created_at DESC', [landlordId]);
+        console.log(`Complaints for landlord ${landlordId}:`, rawRows.length);
         const rows = rawRows.map(normalizeComplaintRow);
-        console.log('Normalized complaints:', rows.length);
         res.json(rows);
     } catch (error) {
         console.error('Error fetching complaints:', error);
@@ -1868,26 +1981,285 @@ app.get('/api/sync/whatsapp', (req, res) => {
     res.json(rows);
 });
 
+// ==================== AUTHENTICATION ROUTES ====================
+
+// Landlord registration
+app.post('/api/auth/register', async (req, res) => {
+    try {
+        const { name, email, phone, company, city, password, preferredChannel, collectionMonthStart } = req.body;
+
+        if (!name || !email || !password) {
+            return res.status(400).json({ error: 'Name, email, and password are required' });
+        }
+
+        // Check if landlord already exists
+        const existingLandlord = await queryOne('SELECT id FROM landlords WHERE email = $1', [email]);
+        if (existingLandlord) {
+            return res.status(409).json({ error: 'Email already registered' });
+        }
+
+        // Hash password
+        const saltRounds = 10;
+        const passwordHash = await bcrypt.hash(password, saltRounds);
+
+        // Create landlord
+        const landlordId = generateId();
+        const landlord = {
+            id: landlordId,
+            name,
+            email,
+            phone: phone || '',
+            company: company || '',
+            city: city || 'Nairobi',
+            preferredChannel: preferredChannel || 'whatsapp',
+            collectionMonthStart: collectionMonthStart || 1,
+            passwordHash,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+
+        await query(
+            `INSERT INTO landlords (id, name, email, phone, company, city, preferred_channel, collection_month_start, password_hash, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+            [
+                landlord.id,
+                landlord.name,
+                landlord.email,
+                landlord.phone,
+                landlord.company,
+                landlord.city,
+                landlord.preferredChannel,
+                landlord.collectionMonthStart,
+                landlord.passwordHash,
+                landlord.createdAt,
+                landlord.updatedAt
+            ]
+        );
+
+        // Generate token
+        const token = generateToken(landlord);
+
+        res.status(201).json({
+            landlord: {
+                id: landlord.id,
+                name: landlord.name,
+                email: landlord.email,
+                phone: landlord.phone,
+                company: landlord.company,
+                city: landlord.city,
+                preferredChannel: landlord.preferredChannel,
+                collectionMonthStart: landlord.collectionMonthStart
+            },
+            token
+        });
+
+    } catch (error) {
+        console.error('Registration error:', error);
+        res.status(500).json({ error: 'Registration failed' });
+    }
+});
+
+// Landlord login
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({ error: 'Email and password are required' });
+        }
+
+        // Find landlord
+        const landlord = await queryOne(
+            'SELECT * FROM landlords WHERE email = $1',
+            [email]
+        );
+
+        if (!landlord) {
+            return res.status(401).json({ error: 'Invalid email or password' });
+        }
+
+        // Verify password
+        const isValidPassword = await bcrypt.compare(password, landlord.password_hash);
+        if (!isValidPassword) {
+            return res.status(401).json({ error: 'Invalid email or password' });
+        }
+
+        // Generate token
+        const token = generateToken(landlord);
+
+        res.json({
+            landlord: {
+                id: landlord.id,
+                name: landlord.name,
+                email: landlord.email,
+                phone: landlord.phone,
+                company: landlord.company,
+                city: landlord.city,
+                preferredChannel: landlord.preferred_channel,
+                collectionMonthStart: landlord.collection_month_start
+            },
+            token
+        });
+
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({ error: 'Login failed' });
+    }
+});
+
+// Get current landlord profile
+app.get('/api/auth/me', authenticateToken, async (req, res) => {
+    try {
+        const landlord = await queryOne(
+            'SELECT id, name, email, phone, company, city, preferred_channel, collection_month_start FROM landlords WHERE id = $1',
+            [req.landlord.id]
+        );
+
+        if (!landlord) {
+            return res.status(404).json({ error: 'Landlord not found' });
+        }
+
+        res.json({
+            id: landlord.id,
+            name: landlord.name,
+            email: landlord.email,
+            phone: landlord.phone,
+            company: landlord.company,
+            city: landlord.city,
+            preferredChannel: landlord.preferred_channel,
+            collectionMonthStart: landlord.collection_month_start
+        });
+
+    } catch (error) {
+        console.error('Get profile error:', error);
+        res.status(500).json({ error: 'Failed to get profile' });
+    }
+});
+
+// Update landlord profile
+app.put('/api/auth/me', authenticateToken, async (req, res) => {
+    try {
+        const { name, phone, company, city, preferredChannel, collectionMonthStart } = req.body;
+
+        await query(
+            `UPDATE landlords
+             SET name = $1, phone = $2, company = $3, city = $4, preferred_channel = $5, collection_month_start = $6, updated_at = $7
+             WHERE id = $8`,
+            [
+                name,
+                phone || '',
+                company || '',
+                city || '',
+                preferredChannel || 'whatsapp',
+                collectionMonthStart || 1,
+                new Date().toISOString(),
+                req.landlord.id
+            ]
+        );
+
+        const updatedLandlord = await queryOne(
+            'SELECT id, name, email, phone, company, city, preferred_channel, collection_month_start FROM landlords WHERE id = $1',
+            [req.landlord.id]
+        );
+
+        res.json({
+            id: updatedLandlord.id,
+            name: updatedLandlord.name,
+            email: updatedLandlord.email,
+            phone: updatedLandlord.phone,
+            company: updatedLandlord.company,
+            city: updatedLandlord.city,
+            preferredChannel: updatedLandlord.preferred_channel,
+            collectionMonthStart: updatedLandlord.collection_month_start
+        });
+
+    } catch (error) {
+        console.error('Update profile error:', error);
+        res.status(500).json({ error: 'Failed to update profile' });
+    }
+});
+
 // ==================== SYNC ROUTES (React app calls these) ====================
 // ==================== SYNC ROUTES (React app calls these) ====================
 
+// Upsert payments from React app
+app.post('/api/sync/payments', authenticateToken, async (req, res) => {
+    try {
+        const p = req.body;
+        const landlordId = req.landlord.id;
+
+        if (!p.id || !p.tenantId) {
+            return res.status(400).json({ error: 'id and tenantId required' });
+        }
+
+        // Insert/update payment in database with landlord_id
+        await query(
+            `INSERT INTO payments (id, landlord_id, tenant_id, tenant_name, amount, period, method, reference, paid_at, created_at, status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+             ON CONFLICT (id) DO UPDATE SET
+             tenant_id = EXCLUDED.tenant_id,
+             tenant_name = EXCLUDED.tenant_name,
+             amount = EXCLUDED.amount,
+             period = EXCLUDED.period,
+             method = EXCLUDED.method,
+             reference = EXCLUDED.reference,
+             paid_at = EXCLUDED.paid_at,
+             created_at = EXCLUDED.created_at,
+             status = EXCLUDED.status
+             WHERE landlord_id = $2`,
+            [
+                p.id,
+                landlordId,
+                p.tenantId,
+                p.tenantName || '',
+                Number(p.amount) || 0,
+                p.period || '',
+                p.method || 'M-Pesa',
+                p.reference || '',
+                p.paidAt || new Date().toISOString(),
+                p.createdAt || new Date().toISOString(),
+                p.status || 'paid',
+                landlordId // for WHERE clause in UPDATE
+            ]
+        );
+
+        console.log(`[SYNC] Payment synced for landlord ${landlordId}: ${p.tenantName} ${p.amount}`);
+
+        // Send real WhatsApp receipt to tenant
+        const tenantResult = await queryOne('SELECT * FROM tenants WHERE id = $1 AND landlord_id = $2', [p.tenantId, landlordId]);
+        const tenant = tenantResult ? normalizeTenantRow(tenantResult) : null;
+        if (tenant && tenant.phone) {
+            const receiptMsg = `✅ *Payment Confirmed!*\n\nAmount: ${kenyaUtils.formatKES(Number(p.amount))}\nPeriod: ${p.period}\nDate: ${kenyaUtils.formatDate(p.paidAt || new Date().toISOString())}\n\nThank you for your payment!`;
+            whatsappProcessor.sendWhatsAppMessage(tenant.phone, receiptMsg).then(result => {
+                console.log(`[SYNC] Receipt sent to ${tenant.name}: ${result.success ? 'ok' : result.error}`);
+            }).catch(err => console.error('WhatsApp receipt error:', err));
+        }
+
+        res.json({ ok: true });
+    } catch (error) {
+        console.error('Payment sync error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Upsert tenant from React app
-app.post('/api/sync/tenants', async (req, res) => {
+app.post('/api/sync/tenants', authenticateToken, async (req, res) => {
     try {
         const t = req.body;
+        const landlordId = req.landlord.id;
 
         if (!t.id || !t.name) {
             return res.status(400).json({ error: 'id and name required' });
         }
 
-        // Find the property to get propertyId
-        const propertyResult = await queryOne('SELECT id FROM properties WHERE name = $1', [t.property]);
+        // Find the property to get propertyId (only properties owned by this landlord)
+        const propertyResult = await queryOne('SELECT id FROM properties WHERE name = $1 AND landlord_id = $2', [t.property, landlordId]);
         const propertyId = propertyResult ? propertyResult.id : null;
 
-        // Update database
+        // Update database with landlord_id
         await query(
-            `INSERT INTO tenants (id, name, phone, unit, property, rent, status, method, due_date, lease_end, assigned_unit, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            `INSERT INTO tenants (id, landlord_id, name, phone, unit, property, rent, status, method, due_date, lease_end, assigned_unit, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
              ON CONFLICT (id) DO UPDATE SET
              name = EXCLUDED.name,
              phone = EXCLUDED.phone,
@@ -1899,9 +2271,11 @@ app.post('/api/sync/tenants', async (req, res) => {
              due_date = EXCLUDED.due_date,
              lease_end = EXCLUDED.lease_end,
              assigned_unit = EXCLUDED.assigned_unit,
-             created_at = EXCLUDED.created_at`,
+             created_at = EXCLUDED.created_at
+             WHERE landlord_id = $2`,
             [
                 t.id,
+                landlordId,
                 t.name,
                 t.phone || '',
                 t.unit || '',
@@ -1916,11 +2290,12 @@ app.post('/api/sync/tenants', async (req, res) => {
                     unitNumber: t.unit,
                     unitId: t.unit
                 }) : null,
-                t.createdAt || new Date().toISOString()
+                t.createdAt || new Date().toISOString(),
+                landlordId // for WHERE clause in UPDATE
             ]
         );
 
-        console.log(`[SYNC] Tenant synced to database: ${t.name} (${t.phone})`);
+        console.log(`[SYNC] Tenant synced for landlord ${landlordId}: ${t.name} (${t.phone})`);
         res.json({ ok: true });
     } catch (error) {
         console.error('Tenant sync error:', error);
@@ -1983,50 +2358,6 @@ app.post('/api/sync/payments', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
-    const { tenantId, body, direction, channel } = req.body;
-    const id = generateId();
-    const timestamp = new Date().toISOString();
-
-    // Save to in-memory first
-    const msgObj = {
-        id,
-        tenantId,
-        direction: direction || 'out',
-        body,
-        timestamp,
-        channel: channel || 'landlord',
-    };
-    whatsappMessages.push(msgObj);
-
-    // Try SQLite
-    try {
-        db.prepare(`
-            INSERT INTO wa_messages (id, tenant_id, direction, body, timestamp, channel)
-            VALUES (?, ?, ?, ?, ?, ?)
-        `).run(id, tenantId, direction || 'out', body, timestamp, channel || 'landlord');
-    } catch(e) {}
-
-    // If outbound, send real WhatsApp
-    if (direction === 'out') {
-        // Look up tenant in memory first, then SQLite
-        let tenant = tenants.find(t => t.id === tenantId);
-        if (!tenant) {
-            try {
-                const row = db.prepare('SELECT * FROM tenants WHERE id = ?').get(tenantId);
-                if (row) tenant = normalizeTenantRow(row);
-            } catch(e) {}
-        }
-
-        if (tenant?.phone) {
-            const result = await whatsappProcessor.sendWhatsAppMessage(tenant.phone, body);
-            console.log(`[WA] Sent to ${tenant.name} (${tenant.phone}): ${result.success ? 'ok' : result.error}`);
-        } else {
-            console.warn(`[WA] No phone found for tenant ${tenantId}`);
-        }
-    }
-
-    res.json({ ok: true, id });
-});
 
 // // Upsert tenant from React app
 // app.post('/api/sync/tenants', (req, res) => {
@@ -2064,32 +2395,61 @@ app.post('/api/sync/payments', async (req, res) => {
 //   res.json({ ok: true });
 // });
 
-// // Get WhatsApp messages for a tenant
-// app.get('/api/sync/wa-messages/:tenantId', (req, res) => {
-//   const rows = db.prepare(
-//     'SELECT * FROM wa_messages WHERE tenant_id = ? ORDER BY timestamp ASC'
-//   ).all(req.params.tenantId);
-//   res.json(rows);
-// });
+// Get WhatsApp messages for a tenant (landlord only)
+app.get('/api/sync/wa-messages/:tenantId', authenticateToken, async (req, res) => {
+  try {
+    const { tenantId } = req.params;
+    const landlordId = req.landlord.id;
 
-// // Push a WA message from the React app (landlord sends manually)
-// app.post('/api/sync/wa-messages', async (req, res) => {
-//   const { tenantId, body, direction, channel } = req.body;
-//   const id = generateId();
-//   db.prepare(`
-//     INSERT INTO wa_messages (id, tenant_id, direction, body, timestamp, channel)
-//     VALUES (?, ?, ?, ?, ?, ?)
-//   `).run(id, tenantId, direction, body, new Date().toISOString(), channel || 'landlord');
+    // Verify tenant belongs to landlord
+    const tenant = await queryOne('SELECT id FROM tenants WHERE id = $1 AND landlord_id = $2', [tenantId, landlordId]);
+    if (!tenant) {
+      return res.status(404).json({ error: 'Tenant not found' });
+    }
 
-//   // If outbound, also send via real WhatsApp
-//   if (direction === 'out') {
-//     const tenant = db.prepare('SELECT * FROM tenants WHERE id = ?').get(tenantId);
-//     if (tenant?.phone) {
-//       await whatsappProcessor.sendWhatsAppMessage(tenant.phone, body);
-//     }
-//   }
-//   res.json({ ok: true, id });
-// });
+    const rows = await queryAll('SELECT * FROM wa_messages WHERE tenant_id = $1 AND landlord_id = $2 ORDER BY timestamp ASC', [tenantId, landlordId]);
+    res.json(rows.map(normalizeWaMessageRow));
+  } catch (error) {
+    console.error('Error fetching WA messages:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Push a WA message from the React app (landlord sends manually)
+app.post('/api/sync/wa-messages', authenticateToken, async (req, res) => {
+  try {
+    const { tenantId, body, direction, channel } = req.body;
+    const landlordId = req.landlord.id;
+
+    // Verify tenant belongs to landlord
+    const tenant = await queryOne('SELECT * FROM tenants WHERE id = $1 AND landlord_id = $2', [tenantId, landlordId]);
+    if (!tenant) {
+      return res.status(404).json({ error: 'Tenant not found' });
+    }
+
+    const id = generateId();
+    await query(
+      `INSERT INTO wa_messages (id, landlord_id, tenant_id, direction, body, timestamp, channel)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [id, landlordId, tenantId, direction, body, new Date().toISOString(), channel || 'landlord']
+    );
+
+    // If outbound, also send via real WhatsApp
+    if (direction === 'out') {
+      const normalizedTenant = normalizeTenantRow(tenant);
+      if (normalizedTenant.phone) {
+        whatsappProcessor.sendWhatsAppMessage(normalizedTenant.phone, body).catch(err => {
+          console.error('WhatsApp send error:', err);
+        });
+      }
+    }
+
+    res.json({ ok: true, id });
+  } catch (error) {
+    console.error('Error sending WA message:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // ==================== DASHBOARD ROUTES ====================
 

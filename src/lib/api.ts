@@ -1,19 +1,29 @@
 const BASE = 'http://localhost:3000';
 
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('auth_token');
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+  };
+};
+
 const post = (path: string, body: object) =>
   fetch(`${BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders(),
     body: JSON.stringify(body),
   }).then(r => r.json());
 
 const get = (path: string) =>
-  fetch(`${BASE}${path}`).then(r => r.json());
+  fetch(`${BASE}${path}`, {
+    headers: getAuthHeaders(),
+  }).then(r => r.json());
 
 const put = (path: string, body?: object) =>
   fetch(`${BASE}${path}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders(),
     body: body ? JSON.stringify(body) : undefined,
   }).then(r => r.json());
 

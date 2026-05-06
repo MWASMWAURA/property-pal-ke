@@ -49,3 +49,20 @@ export const collectionDonut = [
   { name: "Pending",   value: 137000,  color: "hsl(var(--warning))" },
   { name: "Overdue",   value: 125000,  color: "hsl(var(--destructive))" },
 ];
+
+export const payments = [
+  { id: "pay1", tenantId: "t1", tenantName: "Wanjiku Kamau", amount: 45000, period: "April 2026", method: "M-Pesa", reference: "NDE4NDU5OTQ4", paidAt: "2026-04-30T10:00:00Z", status: "paid" as const },
+  { id: "pay2", tenantId: "t1", tenantName: "Wanjiku Kamau", amount: 45000, period: "May 2026", method: "M-Pesa", reference: "NDE4NDU5OTQ5", paidAt: "2026-05-01T14:30:00Z", status: "paid" as const },
+  { id: "pay3", tenantId: "t2", tenantName: "Brian Otieno", amount: 65000, period: "March 2026", method: "Bank", reference: "BT-20260315", paidAt: "2026-03-15T09:15:00Z", status: "paid" as const },
+  { id: "pay4", tenantId: "t3", tenantName: "Aisha Mohamed", amount: 52000, period: "April 2026", method: "M-Pesa", reference: "NDE4NDU5OTQ2", paidAt: "2026-04-28T16:45:00Z", status: "paid" as const },
+  { id: "pay5", tenantId: "t4", tenantName: "David Mwangi", amount: 78000, period: "April 2026", method: "M-Pesa", reference: "NDE4NDU5OTQ3", paidAt: "2026-04-29T11:20:00Z", status: "paid" as const },
+  { id: "pay6", tenantId: "t5", tenantName: "Faith Njeri", amount: 60000, period: "March 2026", method: "Bank", reference: "BT-20260320", paidAt: "2026-03-20T13:10:00Z", status: "paid" as const },
+  { id: "pay7", tenantId: "t6", tenantName: "Samuel Kiprop", amount: 48000, period: "April 2026", method: "M-Pesa", reference: "NDE4NDU5OTQ1", paidAt: "2026-04-27T08:55:00Z", status: "paid" as const },
+  { id: "pay8", tenantId: "t7", tenantName: "Grace Achieng", amount: 120000, period: "April 2026", method: "Bank", reference: "BT-20260425", paidAt: "2026-04-25T15:40:00Z", status: "paid" as const },
+  // Pending payments
+  { id: "pay9", tenantId: "t3", tenantName: "Aisha Mohamed", amount: 52000, period: "May 2026", method: "M-Pesa", reference: null, paidAt: null, status: "pending" as const, dueDate: "2026-05-05T00:00:00Z" },
+  { id: "pay10", tenantId: "t8", tenantName: "Peter Wafula", amount: 85000, period: "May 2026", method: "M-Pesa", reference: null, paidAt: null, status: "pending" as const, dueDate: "2026-05-05T00:00:00Z" },
+  // Overdue payments
+  { id: "pay11", tenantId: "t2", tenantName: "Brian Otieno", amount: 65000, period: "April 2026", method: "Bank", reference: null, paidAt: null, status: "overdue" as const, dueDate: "2026-04-01T00:00:00Z" },
+  { id: "pay12", tenantId: "t5", tenantName: "Faith Njeri", amount: 60000, period: "April 2026", method: "Bank", reference: null, paidAt: null, status: "overdue" as const, dueDate: "2026-04-01T00:00:00Z" },
+];
