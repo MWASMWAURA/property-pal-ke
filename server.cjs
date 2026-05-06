@@ -38,200 +38,304 @@ if (metaPhoneNumberId && metaAccessToken) {
     console.log('⚠️  Meta credentials not found. WhatsApp messaging will be simulated.');
 }
 
-// SQLite persistence (fallback to in-memory if better-sqlite3 not available)
+// Database connection - supports both Supabase and local PostgreSQL
+const { Pool } = require('pg');
 let db;
-try {
+
+if (process.env.DATABASE_URL) {
+    // Supabase connection
+    db = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: {
+            rejectUnauthorized: false // Required for Supabase
+        }
+    });
+
+    // Test connection
+    db.connect()
+        .then(() => console.log('✅ Supabase PostgreSQL database connected'))
+        .catch(err => {
+            console.error('❌ Supabase connection failed:', err.message);
+            console.log('💡 Falling back to local SQLite...');
+
+            // Fallback to SQLite if Supabase fails
+            const Database = require('better-sqlite3');
+            db = new Database('propertyhub.db');
+            console.log('✅ SQLite database initialized (fallback mode)');
+
+            // Override query methods for SQLite compatibility
+            db.query = (sql, params = []) => {
+                try {
+                    if (sql.trim().toUpperCase().startsWith('SELECT')) {
+                        return { rows: db.prepare(sql).all(params) };
+                    } else {
+                        const stmt = db.prepare(sql);
+                        const result = stmt.run(params);
+                        return { rowCount: result.changes };
+                    }
+                } catch (error) {
+                    console.error('SQLite query error:', error);
+                    throw error;
+                }
+            };
+
+            db.queryOne = (sql, params = []) => {
+                try {
+                    return db.prepare(sql).get(params);
+                } catch (error) {
+                    console.error('SQLite queryOne error:', error);
+                    throw error;
+                }
+            };
+
+            db.queryAll = (sql, params = []) => {
+                try {
+                    return db.prepare(sql).all(params);
+                } catch (error) {
+                    console.error('SQLite queryAll error:', error);
+                    throw error;
+                }
+            };
+        });
+} else {
+    // Local SQLite fallback
+    console.log('⚠️  No DATABASE_URL found, using local SQLite storage');
     const Database = require('better-sqlite3');
     db = new Database('propertyhub.db');
     console.log('✅ SQLite database initialized');
-} catch (error) {
-    console.log('⚠️  better-sqlite3 not available, using in-memory storage');
-    // Simple in-memory database implementation
-    const tables = {
-        properties: [],
-        tenants: [],
-        payments: [],
-        complaints: [],
-        notifications: [],
-        wa_messages: []
+
+    // Add query methods for compatibility
+    db.query = (sql, params = []) => {
+        try {
+            if (sql.trim().toUpperCase().startsWith('SELECT')) {
+                return { rows: db.prepare(sql).all(params) };
+            } else {
+                const stmt = db.prepare(sql);
+                const result = stmt.run(params);
+                return { rowCount: result.changes };
+            }
+        } catch (error) {
+            console.error('SQLite query error:', error);
+            throw error;
+        }
     };
 
-    db = {
-        exec: (sql) => {
-            // Parse CREATE TABLE statements
-            const createMatch = sql.match(/CREATE TABLE IF NOT EXISTS (\w+) \(([\s\S]+?)\)/);
-            if (createMatch) {
-                const tableName = createMatch[1];
-                if (!tables[tableName]) {
-                    tables[tableName] = [];
-                }
-            }
-        },
-        prepare: (sql) => {
-            const insertMatch = sql.match(/INSERT INTO (\w+) \((.*?)\) VALUES \((.*?)\)/);
-            const insertOrReplaceMatch = sql.match(/INSERT OR REPLACE INTO (\w+) \((.*?)\) VALUES \((.*?)\)/);
-            if (insertMatch || insertOrReplaceMatch) {
-                const match = insertOrReplaceMatch || insertMatch;
-                const tableName = match[1];
-                const columns = match[2].split(',').map(c => c.trim().replace(/`/g, ''));
-                const values = match[3].split(',').map(v => v.trim().replace(/^\?/, ''));
+    db.queryOne = (sql, params = []) => {
+        try {
+            return db.prepare(sql).get(params);
+        } catch (error) {
+            console.error('SQLite queryOne error:', error);
+            throw error;
+        }
+    };
 
-                return {
-                    run: (...params) => {
-                        if (!tables[tableName]) tables[tableName] = [];
-                        const row = {};
-                        columns.forEach((col, i) => {
-                            row[col] = params[i] || values[i] || null;
-                        });
-                        row.id = row.id || `mem_${Date.now()}_${Math.random()}`;
-
-                        // For INSERT OR REPLACE, replace existing row with same id
-                        const existingIndex = tables[tableName].findIndex(r => r.id === row.id);
-                        if (existingIndex >= 0) {
-                            tables[tableName][existingIndex] = row;
-                        } else {
-                            tables[tableName].push(row);
-                        }
-
-                        console.log(`[MEM-DB] ${insertOrReplaceMatch ? 'INSERT OR REPLACE' : 'INSERT'} into ${tableName}:`, row.id);
-                        return { changes: 1 };
-                    }
-                };
-            }
-
-            const selectMatch = sql.match(/SELECT \* FROM (\w+)/);
-            if (selectMatch) {
-                const tableName = selectMatch[1];
-                return {
-                    all: () => tables[tableName] || [],
-                    get: () => (tables[tableName] || [])[0] || null
-                };
-            }
-
-            const selectWhereMatch = sql.match(/SELECT \* FROM (\w+) WHERE (.+)/);
-            if (selectWhereMatch) {
-                const tableName = selectWhereMatch[1];
-                const whereClause = selectWhereMatch[2];
-                return {
-                    get: (...params) => {
-                        const table = tables[tableName] || [];
-                        // Handle specific WHERE clauses
-                        if (whereClause.includes('replace(replace(phone')) {
-                            // Normalize phone for search
-                            const searchPhone = params[0]?.replace(/\D/g, '') || '';
-                            return table.find(row => {
-                                const rowPhone = row.phone?.replace(/\D/g, '') || '';
-                                return rowPhone === searchPhone;
-                            }) || null;
-                        }
-                        if (whereClause.includes('id = ?')) {
-                            return table.find(row => row.id === params[0]) || null;
-                        }
-                        if (whereClause.includes('tenant_id = ?')) {
-                            return table.find(row => row.tenant_id === params[0]) || null;
-                        }
-                        return table[0] || null;
-                    },
-                    all: (...params) => {
-                        const table = tables[tableName] || [];
-                        if (whereClause.includes('tenant_id = ?')) {
-                            return table.filter(row => row.tenant_id === params[0]);
-                        }
-                        return table;
-                    }
-                };
-            }
-
-            // Default no-op
-            return {
-                run: () => ({ changes: 0 }),
-                get: () => null,
-                all: () => []
-            };
+    db.queryAll = (sql, params = []) => {
+        try {
+            return db.prepare(sql).all(params);
+        } catch (error) {
+            console.error('SQLite queryAll error:', error);
+            throw error;
         }
     };
 }
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS properties (
-    id TEXT PRIMARY KEY,
-    name TEXT,
-    address TEXT,
-    type TEXT,
-    status TEXT,
-    monthlyRent INTEGER,
-    taxRate INTEGER,
-    units TEXT,
-    recurringBills TEXT,
-    createdAt TEXT,
-    updatedAt TEXT
-  );
-  CREATE TABLE IF NOT EXISTS tenants (
-    id TEXT PRIMARY KEY,
-    name TEXT,
-    phone TEXT,
-    unit TEXT,
-    property TEXT,
-    rent INTEGER,
-    status TEXT,
-    method TEXT,
-    due_date TEXT,
-    lease_end TEXT,
-    assigned_unit TEXT,
-    created_at TEXT
-  );
-  CREATE TABLE IF NOT EXISTS payments (
-    id TEXT PRIMARY KEY,
-    tenant_id TEXT,
-    tenant_name TEXT,
-    amount INTEGER,
-    period TEXT,
-    method TEXT,
-    reference TEXT,
-    paid_at TEXT,
-    created_at TEXT,
-    status TEXT,
-    due_date TEXT,
-    property_id TEXT
-  );
-  CREATE TABLE IF NOT EXISTS complaints (
-    id TEXT PRIMARY KEY,
-    tenant_id TEXT,
-    tenant_name TEXT,
-    unit TEXT,
-    property TEXT,
-    category TEXT,
-    description TEXT,
-    priority TEXT,
-    status TEXT,
-    source TEXT,
-    created_at TEXT
-  );
-  CREATE TABLE IF NOT EXISTS wa_messages (
-    id TEXT PRIMARY KEY,
-    tenant_id TEXT,
-    direction TEXT,
-    body TEXT,
-    timestamp TEXT,
-    channel TEXT,
-    meta_message_id TEXT,
-    from_phone TEXT,
-    to_phone TEXT,
-    status TEXT
-  );
-  CREATE TABLE IF NOT EXISTS notifications (
-    id TEXT PRIMARY KEY,
-    type TEXT,
-    title TEXT,
-    body TEXT,
-    created_at TEXT,
-    read INTEGER DEFAULT 0,
-    recipient TEXT,
-    message TEXT,
-    sentAt TEXT,
-    status TEXT
-  );
-`);
+const initDatabase = async () => {
+    try {
+        if (db.constructor.name === 'Database') {
+            // SQLite initialization
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS properties (
+                    id TEXT PRIMARY KEY,
+                    name TEXT,
+                    address TEXT,
+                    type TEXT,
+                    status TEXT,
+                    monthlyrent INTEGER,
+                    taxrate INTEGER,
+                    units TEXT,
+                    recurringbills TEXT,
+                    createdat TEXT,
+                    updatedat TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS tenants (
+                    id TEXT PRIMARY KEY,
+                    name TEXT,
+                    phone TEXT,
+                    unit TEXT,
+                    property TEXT,
+                    rent INTEGER,
+                    status TEXT,
+                    method TEXT,
+                    due_date TEXT,
+                    lease_end TEXT,
+                    assigned_unit TEXT,
+                    created_at TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS payments (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT,
+                    tenant_name TEXT,
+                    amount INTEGER,
+                    period TEXT,
+                    method TEXT,
+                    reference TEXT,
+                    paid_at TEXT,
+                    created_at TEXT,
+                    status TEXT,
+                    due_date TEXT,
+                    property_id TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS complaints (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT,
+                    tenant_name TEXT,
+                    unit TEXT,
+                    property TEXT,
+                    category TEXT,
+                    description TEXT,
+                    priority TEXT,
+                    status TEXT,
+                    source TEXT,
+                    created_at TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS wa_messages (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT,
+                    direction TEXT,
+                    body TEXT,
+                    timestamp TEXT,
+                    channel TEXT,
+                    meta_message_id TEXT,
+                    from_phone TEXT,
+                    to_phone TEXT,
+                    status TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS notifications (
+                    id TEXT PRIMARY KEY,
+                    type TEXT,
+                    title TEXT,
+                    body TEXT,
+                    created_at TEXT,
+                    read INTEGER DEFAULT 0,
+                    recipient TEXT,
+                    message TEXT,
+                    sentat TEXT,
+                    status TEXT
+                );
+            `);
+            console.log('✅ SQLite database tables created/verified');
+        } else {
+            // PostgreSQL initialization
+            await db.query(`
+                CREATE TABLE IF NOT EXISTS properties (
+                    id TEXT PRIMARY KEY,
+                    name TEXT,
+                    address TEXT,
+                    type TEXT,
+                    status TEXT,
+                    monthlyrent INTEGER,
+                    taxrate INTEGER,
+                    units TEXT,
+                    recurringbills TEXT,
+                    createdat TEXT,
+                    updatedat TEXT
+                );
+            `);
+
+            await db.query(`
+                CREATE TABLE IF NOT EXISTS tenants (
+                    id TEXT PRIMARY KEY,
+                    name TEXT,
+                    phone TEXT,
+                    unit TEXT,
+                    property TEXT,
+                    rent INTEGER,
+                    status TEXT,
+                    method TEXT,
+                    due_date TEXT,
+                    lease_end TEXT,
+                    assigned_unit TEXT,
+                    created_at TEXT
+                );
+            `);
+
+            await db.query(`
+                CREATE TABLE IF NOT EXISTS payments (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT,
+                    tenant_name TEXT,
+                    amount INTEGER,
+                    period TEXT,
+                    method TEXT,
+                    reference TEXT,
+                    paid_at TEXT,
+                    created_at TEXT,
+                    status TEXT,
+                    due_date TEXT,
+                    property_id TEXT
+                );
+            `);
+
+            await db.query(`
+                CREATE TABLE IF NOT EXISTS complaints (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT,
+                    tenant_name TEXT,
+                    unit TEXT,
+                    property TEXT,
+                    category TEXT,
+                    description TEXT,
+                    priority TEXT,
+                    status TEXT,
+                    source TEXT,
+                    created_at TEXT
+                );
+            `);
+
+            await db.query(`
+                CREATE TABLE IF NOT EXISTS wa_messages (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT,
+                    direction TEXT,
+                    body TEXT,
+                    timestamp TEXT,
+                    channel TEXT,
+                    meta_message_id TEXT,
+                    from_phone TEXT,
+                    to_phone TEXT,
+                    status TEXT
+                );
+            `);
+
+            await db.query(`
+                CREATE TABLE IF NOT EXISTS notifications (
+                    id TEXT PRIMARY KEY,
+                    type TEXT,
+                    title TEXT,
+                    body TEXT,
+                    created_at TEXT,
+                    read BOOLEAN DEFAULT false,
+                    recipient TEXT,
+                    message TEXT,
+                    sentat TEXT,
+                    status TEXT
+                );
+            `);
+
+            console.log('✅ PostgreSQL database tables created/verified');
+        }
+    } catch (error) {
+        console.error('❌ Database initialization failed:', error);
+        console.log('💡 The application will continue with limited functionality');
+    }
+};
+
+initDatabase();
 
 const loadJson = (value, fallback) => {
   if (value == null) return fallback;
@@ -250,6 +354,61 @@ const normalizePropertyRow = (row) => ({
   recurringBills: loadJson(row.recurringBills, [])
 });
 
+// Helper functions for database queries (works with both PostgreSQL and SQLite)
+const query = async (sql, params = []) => {
+    try {
+        if (db.constructor.name === 'Database') {
+            // SQLite mode
+            if (sql.trim().toUpperCase().startsWith('SELECT')) {
+                return { rows: db.prepare(sql).all(params) };
+            } else {
+                const stmt = db.prepare(sql);
+                const result = stmt.run(params);
+                return { rowCount: result.changes };
+            }
+        } else {
+            // PostgreSQL mode
+            return await db.query(sql, params);
+        }
+    } catch (error) {
+        console.error('Database query error:', error);
+        throw error;
+    }
+};
+
+const queryOne = async (sql, params = []) => {
+    try {
+        if (db.constructor.name === 'Database') {
+            // SQLite mode
+            return db.prepare(sql).get(params) || null;
+        } else {
+            // PostgreSQL mode
+            const result = await query(sql, params);
+            return result.rows[0] || null;
+        }
+    } catch (error) {
+        console.error('Database queryOne error:', error);
+        throw error;
+    }
+};
+
+const queryAll = async (sql, params = []) => {
+    try {
+        if (db.constructor.name === 'Database') {
+            // SQLite mode
+            return db.prepare(sql).all(params);
+        } else {
+            // PostgreSQL mode
+            const result = await query(sql, params);
+            return result.rows;
+        }
+    } catch (error) {
+        console.error('Database queryAll error:', error);
+        throw error;
+    }
+};
+
+// Normalization functions for PostgreSQL column names
 const normalizeTenantRow = (row) => ({
   ...row,
   rent: row.rent != null ? Number(row.rent) : row.rent,
@@ -282,8 +441,10 @@ const normalizeWaMessageRow = (row) => ({
 const normalizeNotificationRow = (row) => ({
   ...row,
   createdAt: row.created_at,
-  read: row.read === 1
+  sentAt: row.sentat
 });
+
+
 
 const persistProperty = (property) => db.prepare(
   `INSERT OR REPLACE INTO properties (id, name, address, type, status, monthlyRent, taxRate, units, recurringBills, createdAt, updatedAt)
@@ -325,22 +486,36 @@ const persistPayment = (payment) => db.prepare(
   property_id: payment.propertyId || null
 });
 
-const persistComplaint = (complaint) => db.prepare(
-  `INSERT OR REPLACE INTO complaints (id, tenant_id, tenant_name, unit, property, category, description, priority, status, source, created_at)
-   VALUES (@id, @tenant_id, @tenant_name, @unit, @property, @category, @description, @priority, @status, @source, @created_at)`
-).run({
-  id: complaint.id,
-  tenant_id: complaint.tenantId,
-  tenant_name: complaint.tenantName,
-  unit: complaint.unit,
-  property: complaint.property,
-  category: complaint.category || null,
-  description: complaint.description,
-  priority: complaint.priority || 'medium',
-  status: complaint.status || 'pending',
-  source: complaint.source || 'tenant',
-  created_at: complaint.createdAt || new Date().toISOString()
-});
+const persistComplaint = async (complaint) => {
+    await query(
+        `INSERT INTO complaints (id, tenant_id, tenant_name, unit, property, category, description, priority, status, source, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         ON CONFLICT (id) DO UPDATE SET
+         tenant_id = EXCLUDED.tenant_id,
+         tenant_name = EXCLUDED.tenant_name,
+         unit = EXCLUDED.unit,
+         property = EXCLUDED.property,
+         category = EXCLUDED.category,
+         description = EXCLUDED.description,
+         priority = EXCLUDED.priority,
+         status = EXCLUDED.status,
+         source = EXCLUDED.source,
+         created_at = EXCLUDED.created_at`,
+        [
+            complaint.id,
+            complaint.tenantId,
+            complaint.tenantName,
+            complaint.unit,
+            complaint.property,
+            complaint.category || null,
+            complaint.description,
+            complaint.priority || 'medium',
+            complaint.status || 'pending',
+            complaint.source || 'tenant',
+            complaint.createdAt || new Date().toISOString()
+        ]
+    );
+};
 
 const persistWaMessage = (message) => db.prepare(
   `INSERT OR REPLACE INTO wa_messages (id, tenant_id, direction, body, timestamp, channel, meta_message_id, from_phone, to_phone, status)
@@ -765,20 +940,20 @@ function normalizePhoneForSearch(phone) {
   return formatted.replace(/\D/g, '');
 }
 
-function findTenantByPhone(phone) {
+async function findTenantByPhone(phone) {
   const normalized = normalizePhoneForSearch(phone);
 
-  // First check the in-memory tenant list for the active runtime state.
-  const tenant = tenants.find((t) => normalizePhoneForSearch(t.phone) === normalized);
-  if (tenant) {
-    return tenant;
+  // Query database directly (since we're using persistent storage now)
+  try {
+    const result = await queryOne(
+      `SELECT * FROM tenants WHERE replace(replace(phone,' ',''),'+','') = $1`,
+      [normalized.replace(/[\s+]/g, '')]
+    );
+    return result ? normalizeTenantRow(result) : null;
+  } catch (error) {
+    console.error('Error finding tenant by phone:', error);
+    return null;
   }
-
-  // Fallback to DB lookup if needed.
-  return db.prepare(`
-    SELECT * FROM tenants 
-    WHERE replace(replace(phone,' ',''),'+','') = replace(replace(?,'+',''),' ','')
-  `).get(normalized);
 }
 
 function getPaymentsByTenant(tenantId) {
@@ -1089,31 +1264,49 @@ app.post('/api/complaints', (req, res) => {
     res.status(201).json(complaint);
 });
 
-app.put('/api/complaints/:id', (req, res) => {
-    const index = complaints.findIndex(c => c.id === req.params.id);
-    if (index === -1) return res.status(404).json({ error: 'Complaint not found' });
+app.put('/api/complaints/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const newStatus = req.body.status;
 
-    const oldStatus = complaints[index].status;
-    const newStatus = req.body.status;
-    complaints[index] = { ...complaints[index], ...req.body, updatedAt: new Date().toISOString() };
-    persistComplaint(complaints[index]);
-
-    // Send notification to tenant if status changed to resolved
-    if (oldStatus !== 'resolved' && newStatus === 'resolved') {
-        const complaint = complaints[index];
-        const tenant = tenants.find(t => t.id === complaint.tenantId);
-        if (tenant && tenant.phone) {
-            const ref = complaint.id.slice(-6).toUpperCase();
-            const message = `✅ *Complaint Resolved!*\n\nReference: #${ref}\nCategory: ${complaint.category}\nStatus: Resolved\n\nThank you for your patience. Reply MENU for more options.`;
-
-            // Send WhatsApp message
-            whatsappProcessor.sendWhatsAppMessage(tenant.phone, message).catch(err => {
-                console.error('Failed to send resolution message:', err);
-            });
+        // Get current complaint
+        const currentComplaint = await queryOne('SELECT * FROM complaints WHERE id = $1', [id]);
+        if (!currentComplaint) {
+            return res.status(404).json({ error: 'Complaint not found' });
         }
-    }
 
-    res.json(complaints[index]);
+        const oldStatus = currentComplaint.status;
+
+        // Update complaint
+        await query(
+            'UPDATE complaints SET status = $1 WHERE id = $2',
+            [newStatus, id]
+        );
+
+        // Get updated complaint
+        const updatedComplaint = await queryOne('SELECT * FROM complaints WHERE id = $1', [id]);
+        const normalizedComplaint = normalizeComplaintRow(updatedComplaint);
+
+        // Send notification to tenant if status changed to resolved
+        if (oldStatus !== 'resolved' && newStatus === 'resolved') {
+            const tenantResult = await queryOne('SELECT * FROM tenants WHERE id = $1', [normalizedComplaint.tenantId]);
+            const tenant = tenantResult ? normalizeTenantRow(tenantResult) : null;
+            if (tenant && tenant.phone) {
+                const ref = normalizedComplaint.id.slice(-6).toUpperCase();
+                const message = `✅ *Complaint Resolved!*\n\nReference: #${ref}\nCategory: ${normalizedComplaint.category}\nStatus: Resolved\n\nThank you for your patience. Reply MENU for more options.`;
+
+                // Send WhatsApp message
+                whatsappProcessor.sendWhatsAppMessage(tenant.phone, message).catch(err => {
+                    console.error('Failed to send resolution message:', err);
+                });
+            }
+        }
+
+        res.json(normalizedComplaint);
+    } catch (error) {
+        console.error('Error updating complaint:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // ==================== MAINTENANCE ROUTES ====================
@@ -1221,13 +1414,15 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
                         const text = rawText.toUpperCase();
                         const messageId = message.id;
 
-                        const tenant = findTenantByPhone(from);
+                        const tenant = await findTenantByPhone(from);
 
                         // Save inbound message
                         const inboundId = generateId();
-                        db.prepare(`INSERT INTO wa_messages (id, tenant_id, direction, body, timestamp, channel, meta_message_id, from_phone)
-                                    VALUES (?, ?, 'in', ?, ?, 'tenant', ?, ?)`)
-                          .run(inboundId, tenant?.id || from, rawText, new Date().toISOString(), messageId, from);
+                        await query(
+                          `INSERT INTO wa_messages (id, tenant_id, direction, body, timestamp, channel, meta_message_id, from_phone)
+                           VALUES ($1, $2, 'in', $3, $4, 'tenant', $5, $6)`,
+                          [inboundId, tenant?.id || from, rawText, new Date().toISOString(), messageId, from]
+                        );
 
                         // Detect if this is a complaint or maintenance request
                         const isComplaint = text.includes('COMPLAIN') || text.includes('ISSUE') || text.includes('PROBLEM');
@@ -1238,21 +1433,22 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
                           const complaintId = generateId();
                           const category = isMaintenance ? 'Maintenance' : 'General';
                           try {
-                            const result = db.prepare(`
-                              INSERT INTO complaints (id, tenant_id, tenant_name, unit, property, category, description, priority, status, source, created_at)
-                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            `).run(
-                              complaintId,
-                              tenant?.id || from,
-                              tenant?.name || 'Unknown Tenant',
-                              tenant?.unit || 'N/A',
-                              tenant?.property || 'N/A',
-                              category,
-                              rawText,
-                              'medium',
-                              'pending',
-                              'whatsapp',
-                              new Date().toISOString()
+                            await query(
+                              `INSERT INTO complaints (id, tenant_id, tenant_name, unit, property, category, description, priority, status, source, created_at)
+                               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                              [
+                                complaintId,
+                                tenant?.id || from,
+                                tenant?.name || 'Unknown Tenant',
+                                tenant?.unit || 'N/A',
+                                tenant?.property || 'N/A',
+                                category,
+                                rawText,
+                                'medium',
+                                'pending',
+                                'whatsapp',
+                                new Date().toISOString()
+                              ]
                             );
                             console.log('Inserted complaint:', complaintId, 'for tenant:', tenant?.name || from);
                           } catch (error) {
@@ -1264,9 +1460,11 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
                           await whatsappProcessor.sendWhatsAppMessage(from, ackMessage);
                           
                           const outboundId = generateId();
-                          db.prepare(`INSERT INTO wa_messages (id, tenant_id, direction, body, timestamp, channel, from_phone, to_phone)
-                                      VALUES (?, ?, 'out', ?, ?, 'bot', ?, ?)`)
-                            .run(outboundId, tenant?.id || from, ackMessage, new Date().toISOString(), metaPhoneNumberId, from);
+                          await query(
+                            `INSERT INTO wa_messages (id, tenant_id, direction, body, timestamp, channel, from_phone, to_phone)
+                             VALUES ($1, $2, 'out', $3, $4, 'bot', $5, $6)`,
+                            [outboundId, tenant?.id || from, ackMessage, new Date().toISOString(), metaPhoneNumberId, from]
+                          );
                         } else {
                           // Process as command for demo
                           const response = await whatsappProcessor.process(from, text || 'MENU', tenant);
@@ -1274,20 +1472,27 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
                             await whatsappProcessor.sendWhatsAppMessage(from, response.message);
                             
                             const outboundId = generateId();
-                            db.prepare(`INSERT INTO wa_messages (id, tenant_id, direction, body, timestamp, channel)
-                                        VALUES (?, ?, 'out', ?, ?, 'bot')`)
-                              .run(outboundId, tenant?.id || from, response.message, new Date().toISOString());
+                            await query(
+                              `INSERT INTO wa_messages (id, tenant_id, direction, body, timestamp, channel)
+                               VALUES ($1, $2, 'out', $3, $4, 'bot')`,
+                              [outboundId, tenant?.id || from, response.message, new Date().toISOString()]
+                            );
                           }
                         }
 
                         // Push notification for landlord dashboard
                         if (isComplaint || isMaintenance) {
-                          db.prepare(`INSERT INTO notifications (id, type, title, body, created_at, read)
-                                      VALUES (?, ?, ?, ?, ?, 0)`)
-                            .run(generateId(), isMaintenance ? 'maintenance' : 'complaint',
-                                 `${tenant?.name || from} - ${isMaintenance ? 'Maintenance' : 'Complaint'}`,
-                                 `${rawText.slice(0, 80)}`,
-                                 new Date().toISOString());
+                          await query(
+                            `INSERT INTO notifications (id, type, title, body, created_at, read)
+                             VALUES ($1, $2, $3, $4, $5, false)`,
+                            [
+                              generateId(),
+                              isMaintenance ? 'maintenance' : 'complaint',
+                              `${tenant?.name || from} - ${isMaintenance ? 'Maintenance' : 'Complaint'}`,
+                              `${rawText.slice(0, 80)}`,
+                              new Date().toISOString()
+                            ]
+                          );
                         }
                     }
                 }
@@ -1635,9 +1840,9 @@ app.get('/api/sync/payments', (req, res) => {
     res.json(rows);
 });
 
-app.get('/api/sync/complaints', (req, res) => {
+app.get('/api/sync/complaints', async (req, res) => {
     try {
-        const rawRows = db.prepare('SELECT * FROM complaints').all();
+        const rawRows = await queryAll('SELECT * FROM complaints ORDER BY created_at DESC');
         console.log('Raw complaints from DB:', rawRows.length);
         const rows = rawRows.map(normalizeComplaintRow);
         console.log('Normalized complaints:', rows.length);
@@ -1648,9 +1853,14 @@ app.get('/api/sync/complaints', (req, res) => {
     }
 });
 
-app.get('/api/sync/notifications', (req, res) => {
-    const rows = db.prepare('SELECT * FROM notifications').all().map(normalizeNotificationRow);
-    res.json(rows);
+app.get('/api/sync/notifications', async (req, res) => {
+    try {
+        const rows = await queryAll('SELECT * FROM notifications ORDER BY created_at DESC');
+        res.json(rows.map(normalizeNotificationRow));
+    } catch (error) {
+        console.error('Error fetching notifications:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 app.get('/api/sync/whatsapp', (req, res) => {
@@ -1661,179 +1871,118 @@ app.get('/api/sync/whatsapp', (req, res) => {
 // ==================== SYNC ROUTES (React app calls these) ====================
 // ==================== SYNC ROUTES (React app calls these) ====================
 
-// Upsert tenant from React app - updates BOTH memory and SQLite
-app.post('/api/sync/tenants', (req, res) => {
-    const t = req.body;
-    
-    if (!t.id || !t.name) {
-        return res.status(400).json({ error: 'id and name required' });
-    }
-
-    // Always update in-memory array first - this is what the bot reads
-    const existingIndex = tenants.findIndex(existing => existing.id === t.id);
-
-    // Find the property to get propertyId
-    const propertyObj = properties.find(p => p.name === t.property);
-    const propertyId = propertyObj ? propertyObj.id : null;
-
-    const tenantObj = {
-        id: t.id,
-        name: t.name,
-        phone: t.phone || '',
-        rent: Number(t.rent) || 0,
-        status: t.status || 'pending',
-        method: t.method || 'M-Pesa',
-        dueDate: t.dueDate || '',
-        leaseEnd: t.leaseEnd || '',
-        moveInDate: t.createdAt || new Date().toISOString(), // Use created date as move-in date
-        assignedUnit: t.unit && propertyId ? {
-            propertyId: propertyId,
-            unitNumber: t.unit,
-            unitId: t.unit
-        } : null,
-        createdAt: t.createdAt || new Date().toISOString(),
-    };
-
-    if (existingIndex >= 0) {
-        tenants[existingIndex] = tenantObj;
-        console.log(`[SYNC] Tenant updated in memory: ${t.name} (${t.phone})`);
-    } else {
-        tenants.push(tenantObj);
-        console.log(`[SYNC] Tenant added to memory: ${t.name} (${t.phone}) — total: ${tenants.length}`);
-    }
-
-    // Also try SQLite if available
+// Upsert tenant from React app
+app.post('/api/sync/tenants', async (req, res) => {
     try {
-        db.prepare(`
-            INSERT OR REPLACE INTO tenants
-            (id, name, phone, unit, property, rent, status, method, due_date, lease_end, assigned_unit, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-            t.id, t.name, t.phone || '', tenantObj.assignedUnit?.unitNumber || t.unit || '',
-            t.property || '', t.rent, t.status,
-            t.method, t.dueDate, t.leaseEnd, JSON.stringify(tenantObj.assignedUnit), t.createdAt || new Date().toISOString()
-        );
-    } catch(e) {
-        console.warn('SQLite tenant sync failed:', e);
-        // SQLite not available - in-memory is enough for now
-    }
+        const t = req.body;
 
-    res.json({ ok: true, tenantCount: tenants.length });
+        if (!t.id || !t.name) {
+            return res.status(400).json({ error: 'id and name required' });
+        }
+
+        // Find the property to get propertyId
+        const propertyResult = await queryOne('SELECT id FROM properties WHERE name = $1', [t.property]);
+        const propertyId = propertyResult ? propertyResult.id : null;
+
+        // Update database
+        await query(
+            `INSERT INTO tenants (id, name, phone, unit, property, rent, status, method, due_date, lease_end, assigned_unit, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+             ON CONFLICT (id) DO UPDATE SET
+             name = EXCLUDED.name,
+             phone = EXCLUDED.phone,
+             unit = EXCLUDED.unit,
+             property = EXCLUDED.property,
+             rent = EXCLUDED.rent,
+             status = EXCLUDED.status,
+             method = EXCLUDED.method,
+             due_date = EXCLUDED.due_date,
+             lease_end = EXCLUDED.lease_end,
+             assigned_unit = EXCLUDED.assigned_unit,
+             created_at = EXCLUDED.created_at`,
+            [
+                t.id,
+                t.name,
+                t.phone || '',
+                t.unit || '',
+                t.property || '',
+                Number(t.rent) || 0,
+                t.status || 'pending',
+                t.method || 'M-Pesa',
+                t.dueDate || '',
+                t.leaseEnd || '',
+                propertyId && t.unit ? JSON.stringify({
+                    propertyId: propertyId,
+                    unitNumber: t.unit,
+                    unitId: t.unit
+                }) : null,
+                t.createdAt || new Date().toISOString()
+            ]
+        );
+
+        console.log(`[SYNC] Tenant synced to database: ${t.name} (${t.phone})`);
+        res.json({ ok: true });
+    } catch (error) {
+        console.error('Tenant sync error:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // Upsert payment from React app - updates BOTH memory and SQLite
-app.post('/api/sync/payments', (req, res) => {
-    const p = req.body;
-
-    if (!p.id || !p.tenantId) {
-        return res.status(400).json({ error: 'id and tenantId required' });
-    }
-
-    // Always update in-memory array
-    const existingIndex = payments.findIndex(existing => existing.id === p.id);
-    const paymentObj = {
-        id: p.id,
-        tenantId: p.tenantId,
-        tenantName: p.tenantName || '',
-        amount: Number(p.amount) || 0,
-        period: p.period || '',
-        method: p.method || 'M-Pesa',
-        reference: p.reference || '',
-        paidAt: p.paidAt || new Date().toISOString(),
-        createdAt: p.createdAt || new Date().toISOString(),
-        status: p.status || 'paid',
-    };
-
-    if (existingIndex >= 0) {
-        payments[existingIndex] = paymentObj;
-    } else {
-        payments.push(paymentObj);
-    }
-
-    console.log(`[SYNC] Payment synced: ${p.tenantName} ${p.amount} — total payments: ${payments.length}`);
-
-    // Send real WhatsApp receipt to tenant
-    const tenant = tenants.find(t => t.id === p.tenantId);
-    if (tenant && tenant.phone) {
-        const receiptMsg = `✅ *Payment Confirmed!*\n\nAmount: ${kenyaUtils.formatKES(paymentObj.amount)}\nPeriod: ${paymentObj.period}\nDate: ${kenyaUtils.formatDate(paymentObj.paidAt)}\n\nThank you for your payment!`;
-        whatsappProcessor.sendWhatsAppMessage(tenant.phone, receiptMsg).then(result => {
-            console.log(`[SYNC] Receipt sent to ${tenant.name}: ${result.success ? 'ok' : result.error}`);
-        });
-    }
-
-    // Also try SQLite
+app.post('/api/sync/payments', async (req, res) => {
     try {
-        db.prepare(`
-            INSERT OR REPLACE INTO payments
-            (id, tenant_id, tenant_name, amount, period, method, reference, paid_at, created_at, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-            p.id, p.tenantId, p.tenantName, p.amount, p.period,
-            p.method, p.reference || '', p.paidAt,
-            p.createdAt || new Date().toISOString(), p.status || 'paid'
+        const p = req.body;
+
+        if (!p.id || !p.tenantId) {
+            return res.status(400).json({ error: 'id and tenantId required' });
+        }
+
+        // Insert/update payment in database
+        await query(
+            `INSERT INTO payments (id, tenant_id, tenant_name, amount, period, method, reference, paid_at, created_at, status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             ON CONFLICT (id) DO UPDATE SET
+             tenant_id = EXCLUDED.tenant_id,
+             tenant_name = EXCLUDED.tenant_name,
+             amount = EXCLUDED.amount,
+             period = EXCLUDED.period,
+             method = EXCLUDED.method,
+             reference = EXCLUDED.reference,
+             paid_at = EXCLUDED.paid_at,
+             created_at = EXCLUDED.created_at,
+             status = EXCLUDED.status`,
+            [
+                p.id,
+                p.tenantId,
+                p.tenantName || '',
+                Number(p.amount) || 0,
+                p.period || '',
+                p.method || 'M-Pesa',
+                p.reference || '',
+                p.paidAt || new Date().toISOString(),
+                p.createdAt || new Date().toISOString(),
+                p.status || 'paid'
+            ]
         );
-    } catch(e) {
-        // SQLite not available
-    }
+
+        console.log(`[SYNC] Payment synced to database: ${p.tenantName} ${p.amount}`);
+
+        // Send real WhatsApp receipt to tenant
+        const tenantResult = await queryOne('SELECT * FROM tenants WHERE id = $1', [p.tenantId]);
+        const tenant = tenantResult ? normalizeTenantRow(tenantResult) : null;
+        if (tenant && tenant.phone) {
+            const receiptMsg = `✅ *Payment Confirmed!*\n\nAmount: ${kenyaUtils.formatKES(Number(p.amount))}\nPeriod: ${p.period}\nDate: ${kenyaUtils.formatDate(p.paidAt || new Date().toISOString())}\n\nThank you for your payment!`;
+            whatsappProcessor.sendWhatsAppMessage(tenant.phone, receiptMsg).then(result => {
+                console.log(`[SYNC] Receipt sent to ${tenant.name}: ${result.success ? 'ok' : result.error}`);
+            }).catch(err => console.error('WhatsApp receipt error:', err));
+        }
 
     res.json({ ok: true });
-});
-
-// Get all notifications - reads from memory first, falls back to SQLite
-app.get('/api/sync/notifications', (req, res) => {
-    // Try SQLite first
-    try {
-        const rows = db.prepare('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 50').all();
-        if (rows.length > 0) {
-            return res.json(rows.map(n => ({ ...n, read: n.read === 1 })));
-        }
-    } catch(e) {
-        // SQLite not available
+    } catch (error) {
+        console.error('Payment sync error:', error);
+        res.status(500).json({ error: error.message });
     }
-    // Fall back to in-memory notifications
-    const sorted = [...notifications]
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        .slice(0, 50);
-    res.json(sorted);
 });
-
-// Mark notification read
-app.put('/api/sync/notifications/:id/read', (req, res) => {
-    // Update in-memory
-    const notif = notifications.find(n => n.id === req.params.id);
-    if (notif) notif.read = true;
-
-    // Try SQLite
-    try {
-        db.prepare('UPDATE notifications SET read = 1 WHERE id = ?').run(req.params.id);
-    } catch(e) {}
-
-    res.json({ ok: true });
-});
-
-// Get WhatsApp messages for a tenant - reads from memory + SQLite
-app.get('/api/sync/wa-messages/:tenantId', (req, res) => {
-    const tenantId = req.params.tenantId;
-
-    // Try SQLite first
-    try {
-        const rows = db.prepare(
-            'SELECT * FROM wa_messages WHERE tenant_id = ? ORDER BY timestamp ASC'
-        ).all(tenantId);
-        if (rows.length > 0) {
-            return res.json(rows.map(normalizeWaMessageRow));
-        }
-    } catch(e) {}
-
-    // Fall back to in-memory whatsappMessages
-    const msgs = whatsappMessages
-        .filter(m => m.tenantId === tenantId || m.from === tenantId || m.to === tenantId)
-        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-    res.json(msgs);
-});
-
-// Push a WA message from the React app (landlord sends manually)
-app.post('/api/sync/wa-messages', async (req, res) => {
     const { tenantId, body, direction, channel } = req.body;
     const id = generateId();
     const timestamp = new Date().toISOString();
