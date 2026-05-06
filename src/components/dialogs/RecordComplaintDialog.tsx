@@ -23,10 +23,10 @@ export const RecordComplaintDialog = ({
     notify: true,
   });
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.tenantId || !form.description.trim()) return;
-    const c = recordComplaint({
+    const c = await recordComplaint({
       tenantId: form.tenantId,
       category: form.category,
       description: form.description.trim(),
@@ -37,9 +37,8 @@ export const RecordComplaintDialog = ({
     toast({
       title: "Complaint logged",
       description: form.notify ? `Tenant notified via WhatsApp · Ref #${c.id.slice(-6).toUpperCase()}` : `Saved · Ref #${c.id.slice(-6).toUpperCase()}`,
+
     });
-    setOpen(false);
-    setForm(f => ({ ...f, description: "" }));
   };
 
   return (

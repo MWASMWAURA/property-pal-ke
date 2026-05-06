@@ -1,8 +1,11 @@
+import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { formatKsh } from "@/lib/mock-data";
 import { useData } from "@/lib/data-store";
+import { api } from "@/lib/api";
 import { StatusPill } from "./Dashboard";
 import { Download, MessageCircle, Plus } from "lucide-react";
 import { RecordPaymentDialog } from "@/components/dialogs/RecordPaymentDialog";
@@ -11,14 +14,44 @@ import { toast } from "@/hooks/use-toast";
 
 const Collections = () => {
   const { tenants, sendWhatsApp } = useData();
+  const location = useLocation();
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
+
+  useEffect(() => {
+    if (location.search.includes('import=bulk')) {
+      setBulkImportOpen(true);
+    }
+  }, [location.search]);
+
   const total = tenants.reduce((s, t) => s + t.rent, 0);
   const collected = tenants.filter(t => t.status === "paid").reduce((s, t) => s + t.rent, 0);
   const overdue = tenants.filter(t => t.status === "overdue").reduce((s, t) => s + t.rent, 0);
 
-  const bulkRemind = () => {
-    const overdueT = tenants.filter(t => t.status === "overdue");
-    overdueT.forEach(t => sendWhatsApp(t.id, `Hi ${t.name}, your rent of ${formatKsh(t.rent)} is overdue. Kindly settle ASAP. Reply BALANCE for details.`, "landlord"));
-    toast({ title: "Bulk reminder sent", description: `${overdueT.length} overdue tenants notified via WhatsApp.` });
+  const bulkRemind = async () => {
+    const overdueT = tenants.filter(t => t.status === "overdue" && t.phone);
+    
+    try {
+      await api.bulkRemind(overdueT.map(t => ({
+        id: t.id, name: t.name, rent: t.rent, phone: t.phone
+      })));
+      // Also update local WA threads for Messages page
+      overdueT.forEach(t => {
+        sendWhatsApp(t.id, 
+          `Hi ${t.name}, your rent of ${formatKsh(t.rent)} is overdue. Please settle at your earliest. Send BALANCE for details.`,
+          'out', 'landlord'
+        );
+      });
+      toast({
+        title: "Bulk reminder sent via WhatsApp",
+        description: `${overdueT.length} tenants notified.`
+      });
+    } catch {
+      toast({
+        title: "Server offline",
+        description: "Messages saved locally but not sent.",
+        variant: "destructive"
+      });
+    }
   };
 
   return (
@@ -42,7 +75,11 @@ const Collections = () => {
         <div className="p-4 border-b border-border flex flex-wrap items-center gap-2 justify-between">
           <h2 className="font-bold">All Payments</h2>
           <div className="flex flex-wrap gap-2">
-            <BulkImportDialog trigger={<Button size="sm" variant="outline"><Download className="size-3.5" /> Bulk Import</Button>} />
+            <BulkImportDialog
+              trigger={<Button size="sm" variant="outline"><Download className="size-3.5" /> Bulk Import</Button>}
+              open={bulkImportOpen}
+              onOpenChange={setBulkImportOpen}
+            />
             <Button size="sm" variant="outline" onClick={bulkRemind}><MessageCircle className="size-3.5" /> Bulk Remind</Button>
             <RecordPaymentDialog trigger={<Button size="sm" className="gradient-primary text-primary-foreground"><Plus className="size-3.5" /> Record Payment</Button>} />
           </div>

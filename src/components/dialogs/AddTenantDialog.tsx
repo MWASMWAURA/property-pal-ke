@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,14 +8,18 @@ import { useData, TenantStatus } from "@/lib/data-store";
 import { toast } from "@/hooks/use-toast";
 import { Users } from "lucide-react";
 
-export const AddTenantDialog = ({ trigger }: { trigger: React.ReactNode }) => {
+export const AddTenantDialog = ({ trigger, defaultProperty }: { trigger: React.ReactNode; defaultProperty?: string }) => {
   const { addTenant, properties } = useData();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
-    name: "", phone: "", unit: "", property: "",
+    name: "", phone: "", unit: "", property: defaultProperty || "",
     rent: 30000, status: "pending" as TenantStatus,
     method: "M-Pesa", dueDate: "05/05/2026", leaseEnd: "31/12/2026",
   });
+
+  useEffect(() => {
+    setForm(prev => ({ ...prev, property: defaultProperty || "" }));
+  }, [defaultProperty]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();

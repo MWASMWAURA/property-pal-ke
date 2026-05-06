@@ -65,9 +65,11 @@ const guessMapping = (headers: string[]): Record<FieldKey, string> => {
   return map;
 };
 
-export const BulkImportDialog = ({ trigger }: { trigger: React.ReactNode }) => {
+export const BulkImportDialog = ({ trigger, open: controlledOpen, onOpenChange }: { trigger: React.ReactNode; open?: boolean; onOpenChange?: (open: boolean) => void }) => {
   const { addTenantsBulk, properties } = useData();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setOpen = onOpenChange || setInternalOpen;
   const [step, setStep] = useState<Step>("upload");
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<string[][]>([]);
@@ -91,7 +93,7 @@ export const BulkImportDialog = ({ trigger }: { trigger: React.ReactNode }) => {
   const mapped = useMemo(() => {
     if (step !== "preview") return [];
     return rows.map(r => {
-      const obj: any = {};
+      const obj: Record<FieldKey, string> = {} as Record<FieldKey, string>;
       (Object.keys(mapping) as FieldKey[]).forEach(k => {
         const col = mapping[k];
         const idx = col ? headers.indexOf(col) : -1;
@@ -202,7 +204,7 @@ export const BulkImportDialog = ({ trigger }: { trigger: React.ReactNode }) => {
                     return (
                       <tr key={i} className={`border-t border-border ${!ok ? "bg-destructive/5" : ""}`}>
                         {REQUIRED_FIELDS.map(f => (
-                          <td key={f.key} className="px-3 py-2 whitespace-nowrap">{String((r as any)[f.key] ?? "")}</td>
+                          <td key={f.key} className="px-3 py-2 whitespace-nowrap">{String((r as Record<FieldKey, any>)[f.key] ?? "")}</td>
                         ))}
                       </tr>
                     );

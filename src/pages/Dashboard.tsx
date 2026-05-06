@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import { TrendingUp, TrendingDown, AlertTriangle, Home, CalendarClock, Wrench, ArrowUpRight, MessageCircle, Send, Download, Sparkles, RefreshCw } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
 import { Card } from "@/components/ui/card";
@@ -10,12 +11,13 @@ import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 const Dashboard = () => {
-  const { tenants, properties, maintenance, revenueByMonth, collectionDonut, mode, startTour, resetToOwnData, leaseFilterDays, setLeaseFilterDays, expiringTenants } = useData();
+  const navigate = useNavigate();
+  const { tenants, properties, maintenance, revenueByMonth, collectionDonut, mode, startTour, resetToOwnData, leaseFilterDays, setLeaseFilterDays, expiringTenants, profile } = useData();
 
   const overdueTenants = tenants.filter(t => t.status === "overdue");
   const overdueAmount = overdueTenants.reduce((s, t) => s + t.rent, 0);
   const totalUnits = properties.reduce((s, p) => s + p.units, 0);
-  const occupiedUnits = properties.reduce((s, p) => s + p.occupied, 0);
+  const occupiedUnits = tenants.length;
   const vacantUnits = totalUnits - occupiedUnits;
   const urgentMaint = maintenance.filter(m => m.status !== "resolved").length;
   const expiring = expiringTenants();
@@ -25,7 +27,10 @@ const Dashboard = () => {
   const rate = collectedTotal > 0 ? (collected / collectedTotal) * 100 : 0;
 
   return (
-    <AppShell title="Habari, James 👋" subtitle="Sunday, 3 May 2026 · Here's your portfolio at a glance">
+    <AppShell
+      title={`Habari, ${profile?.name?.split(' ')[0] || "Landlord"} 👋`}
+      subtitle={`${new Date().toLocaleDateString("en-KE", { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} · Here's your portfolio at a glance`}
+    >
       {mode === "demo" && (
         <Card className="p-3 sm:p-4 mb-4 border-accent/40 bg-accent/10 flex flex-col sm:flex-row items-start sm:items-center gap-3">
           <div className="size-9 rounded-lg gradient-gold flex items-center justify-center shrink-0">
@@ -100,7 +105,7 @@ const Dashboard = () => {
             </div>
           </div>
           <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={revenueByMonth} barGap={4}>
+            <BarChart key={revenueByMonth.map(d => d.collected + d.pending).join('-')} data={revenueByMonth} barGap={4}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false}/>
               <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} axisLine={false} tickLine={false}/>
               <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} axisLine={false} tickLine={false} tickFormatter={(v)=>`${(v/1000000).toFixed(1)}M`}/>
@@ -215,9 +220,9 @@ const Dashboard = () => {
           <Card className="p-5 shadow-card border-border/60">
             <h3 className="font-bold mb-3">Quick Actions</h3>
             <div className="space-y-2">
-              <QuickAction icon={<Download className="size-4"/>} label="Import from Excel" sub="Bulk upload payments"/>
-              <QuickAction icon={<Wrench className="size-4"/>} label="Triage maintenance" sub={`${urgentMaint} pending tickets`} accent/>
-              <QuickAction icon={<CalendarClock className="size-4"/>} label="Send renewal notices" sub={`${expiringLeases} leases expiring`}/>
+              <QuickAction icon={<Download className="size-4"/>} label="Import from Excel" sub="Bulk upload payments" onClick={() => navigate('/collections?import=bulk')}/>
+              <QuickAction icon={<Wrench className="size-4"/>} label="Triage maintenance" sub={`${urgentMaint} pending tickets`} accent onClick={() => navigate('/maintenance')}/>
+              <QuickAction icon={<CalendarClock className="size-4"/>} label="Send renewal notices" sub={`${expiringLeases} leases expiring`} onClick={() => navigate('/messages')}/>
             </div>
           </Card>
         </div>
@@ -226,7 +231,7 @@ const Dashboard = () => {
   );
 };
 
-const KpiCard = ({ icon, label, value, sub, trend, trendUp, urgent, action }: any) => (
+const KpiCard = ({ icon, label, value, sub, trend, trendUp, urgent, action }: { icon: React.ReactNode; label: string; value: string | number; sub: string; trend?: string; trendUp?: boolean; urgent?: boolean; action?: React.ReactNode }) => (
   <Card className={cn(
     "p-4 sm:p-5 shadow-card border-border/60 relative overflow-hidden transition-all hover:shadow-card-lg",
     urgent && "gradient-danger text-white border-0"
@@ -271,8 +276,8 @@ export const StatusPill = ({ status }: { status: string }) => {
   );
 };
 
-const QuickAction = ({ icon, label, sub, accent }: any) => (
-  <button className={cn(
+const QuickAction = ({ icon, label, sub, accent, onClick }: { icon: React.ReactNode; label: string; sub: string; accent?: boolean; onClick?: () => void }) => (
+  <button onClick={onClick} className={cn(
     "w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all hover:border-primary/50 hover:bg-muted/40",
     accent ? "border-accent/40 bg-accent/5" : "border-border"
   )}>

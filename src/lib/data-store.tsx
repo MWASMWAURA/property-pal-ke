@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode, useCallback } from "react";
+import { api } from "./api";
 import {
   properties as seedProperties,
   tenants as seedTenants,
@@ -22,6 +23,7 @@ export type Payment = {
   method: string;          // M-Pesa, Bank, Cash
   reference?: string;
   paidAt: string;          // ISO
+  status: "paid" | "pending" | "overdue";
 };
 
 export type Complaint = {
@@ -63,6 +65,7 @@ export type LandlordProfile = {
   company: string;
   city: string;
   preferredChannel: "whatsapp" | "sms" | "email";
+  collectionMonthStart: number; // Day of month when collection period starts (1-31)
 };
 
 type Mode = "demo" | "live" | "unset";
@@ -99,7 +102,8 @@ type Ctx = {
     priority?: Complaint["priority"];
     source?: Complaint["source"];
     notify?: boolean;
-  }) => Complaint;
+  }) => Promise<Complaint>;
+  updateComplaintStatus: (id: string, status: Complaint["status"]) => void;
 
   sendWhatsApp: (tenantId: string, body: string, channel?: WaMessage["channel"]) => void;
   simulateInbound: (tenantId: string, body: string) => void;
@@ -120,6 +124,7 @@ type Ctx = {
 
 const DataCtx = createContext<Ctx | null>(null);
 const KEY = "propertyhub:state:v2";
+const USER_DATA_KEY = "propertyhub:user-data:v1";
 
 const emptyRevenue = [
   { month: "Nov", collected: 0, pending: 0 },
@@ -151,6 +156,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   const [properties, setProperties] = useState<Property[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [maintenance, setMaintenance] = useState<typeof seedMaintenance>([]);
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [waMessages, setWaMessages] = useState<WaMessage[]>([]);
@@ -169,6 +175,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         setProperties(s.properties ?? []);
         setTenants(s.tenants ?? []);
         setPayments(s.payments ?? []);
+        setMaintenance(s.maintenance ?? []);
         setComplaints(s.complaints ?? []);
         setNotifications(s.notifications ?? []);
         setWaMessages(s.waMessages ?? []);
@@ -190,13 +197,103 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     );
   }, [mode, profile, properties, tenants, payments, complaints, notifications, waMessages]);
 
+  // Add this inside DataProvider, after the hydration useEffect
+  useEffect(() => {
+    if (mode === 'unset') return;
+
+    const poll = async () => {
+      try {
+        const serverNotifs = await api.getNotifications();
+        setNotifications(prev => {
+          const existingIds = new Set(prev.map(n => n.id));
+          const newOnes = serverNotifs
+            .filter((n: any) => !existingIds.has(n.id))
+            .map((n: any) => ({
+              id: n.id,
+              type: n.type as AppNotification['type'],
+              title: n.title,
+              body: n.body,
+              createdAt: n.created_at,
+              read: n.read,
+            }));
+          return newOnes.length > 0 ? [...newOnes, ...prev] : prev;
+        });
+      } catch {
+        // Server offline — silent fail, local data still works
+      }
+    };
+
+    poll(); // run once immediately
+    const interval = setInterval(poll, 15000); // then every 15 seconds
+    return () => clearInterval(interval);
+  }, [mode]);
+
+  // Poll for complaints from server
+  useEffect(() => {
+    if (mode === 'unset') return;
+
+    const pollComplaints = async () => {
+      try {
+        const serverComplaints = await api.getComplaints();
+        console.log('Polled complaints from server:', serverComplaints.length);
+        setComplaints(prev => {
+          const existingIds = new Set(prev.map(c => c.id));
+          const newOnes = serverComplaints
+            .filter((c: any) => !existingIds.has(c.id))
+            .map((c: any) => ({
+              id: c.id,
+              tenantId: c.tenant_id,
+              tenantName: c.tenant_name,
+              unit: c.unit,
+              property: c.property,
+              category: c.category,
+              description: c.description,
+              priority: c.priority as Complaint['priority'],
+              status: c.status as Complaint['status'],
+              source: c.source as Complaint['source'],
+              createdAt: c.created_at,
+            }));
+          if (newOnes.length > 0) {
+            console.log('Added new complaints:', newOnes.length);
+          }
+          return newOnes.length > 0 ? [...newOnes, ...prev] : prev;
+        });
+      } catch (error) {
+        console.warn('Failed to poll complaints from server:', error);
+        // Server offline — silent fail, local data still works
+      }
+    };
+
+    pollComplaints(); // run once immediately
+    const interval = setInterval(pollComplaints, 5000); // poll every 5 seconds for faster updates
+    return () => clearInterval(interval);
+  }, [mode]);
+
   const pushNotification = useCallback((n: Omit<AppNotification, "id" | "createdAt" | "read">) => {
     setNotifications(prev => [{ ...n, id: uid("n"), createdAt: new Date().toISOString(), read: false }, ...prev]);
   }, []);
 
   const startDemo = () => {
+    // Backup current user data before switching to demo
+    const currentData = {
+      properties, tenants, payments, maintenance, complaints, notifications, waMessages, profile
+    };
+    localStorage.setItem(USER_DATA_KEY, JSON.stringify(currentData));
+
+    if (!profile) {
+      setProfile({
+        name: "James Kariuki",
+        email: "james.kariuki@demo.com",
+        phone: "+254 712 345 678",
+        company: "Demo Properties Ltd",
+        city: "Nairobi",
+        preferredChannel: "whatsapp",
+        collectionMonthStart: 1,
+      });
+    }
     setProperties(seedProperties);
     setTenants(seedTenants);
+    setMaintenance(seedMaintenance);
     setPayments([]);
     setComplaints([]);
     setNotifications([
@@ -209,14 +306,34 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const startFresh = () => {
-    setProperties([]); setTenants([]); setPayments([]); setComplaints([]);
+    // Clear any backed up user data since we're starting fresh
+    localStorage.removeItem(USER_DATA_KEY);
+    setProperties([]); setTenants([]); setMaintenance([]); setPayments([]); setComplaints([]);
     setNotifications([]); setWaMessages([]);
     setMode("live"); setNeedsOnboarding(false);
   };
 
   const resetToOwnData = () => {
-    setProperties([]); setTenants([]); setPayments([]); setComplaints([]);
-    setNotifications([]); setWaMessages([]);
+    // Restore user data from backup
+    try {
+      const userDataRaw = localStorage.getItem(USER_DATA_KEY);
+      if (userDataRaw) {
+        const userData = JSON.parse(userDataRaw);
+        setProperties(userData.properties || []);
+        setTenants(userData.tenants || []);
+        setPayments(userData.payments || []);
+        setMaintenance(userData.maintenance || []);
+        setComplaints(userData.complaints || []);
+        setNotifications(userData.notifications || []);
+        setWaMessages(userData.waMessages || []);
+        if (userData.profile) setProfile(userData.profile);
+      }
+    } catch (e) {
+      console.warn('Failed to restore user data:', e);
+      // Fallback to empty state
+      setProperties([]); setTenants([]); setMaintenance([]); setPayments([]); setComplaints([]);
+      setNotifications([]); setWaMessages([]);
+    }
     setMode("live"); setTourActive(false);
   };
 
@@ -225,23 +342,34 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   const addTenant: Ctx["addTenant"] = (t) => {
     const tenant = { ...t, id: uid("t") } as Tenant;
     setTenants(prev => [tenant, ...prev]);
+
+    // Sync to server so WhatsApp bot can look up by phone
+    api.syncTenant(tenant).catch(e => console.warn('Tenant sync failed', e));
+
     return tenant;
   };
 
   const addTenantsBulk: Ctx["addTenantsBulk"] = (rows) => {
     const mapped = rows.map(r => ({ ...r, id: uid("t") } as Tenant));
     setTenants(prev => [...mapped, ...prev]);
+
+    // Sync all tenants to server so WhatsApp bot can look up by phone
+    mapped.forEach(tenant => {
+      api.syncTenant(tenant).catch(e => console.warn('Tenant sync failed', e));
+    });
+
     return mapped.length;
   };
 
   const addProperty: Ctx["addProperty"] = (p) =>
     setProperties(prev => [{ ...p, id: uid("p") } as Property, ...prev]);
 
-  const recordPayment: Ctx["recordPayment"] = (p) => {
+  const recordPayment: Ctx["recordPayment"] = async (p) => {
     const tenant = tenants.find(t => t.id === p.tenantId);
     const payment: Payment = {
       id: uid("pay"),
       paidAt: p.paidAt ?? new Date().toISOString(),
+      status: "paid",
       ...p,
     };
     setPayments(prev => [payment, ...prev]);
@@ -252,6 +380,15 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       title: "Payment recorded",
       body: `${formatKsh(p.amount)} from ${p.tenantName} (${p.period})`,
     });
+
+    // Sync to server — server sends the real WhatsApp receipt
+    try {
+      await api.syncPayment({ ...payment });
+    } catch (e) {
+      console.warn('Server sync failed, continuing locally', e);
+    }
+
+    // Keep local WA thread updated for the Messages page
     if (tenant?.phone) {
       const body = `✅ *Payment Confirmed!*\n\nAmount: ${formatKsh(p.amount)}\nPeriod: ${p.period}\nDate: ${new Date(payment.paidAt).toLocaleDateString("en-KE")}\n\nThank you for your payment!`;
       _appendWa(p.tenantId, "out", body, "bot");
@@ -263,11 +400,18 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     setWaMessages(prev => [...prev, { id: uid("wa"), tenantId, direction, body, timestamp: new Date().toISOString(), channel }]);
   };
 
-  const sendWhatsApp: Ctx["sendWhatsApp"] = (tenantId, body, channel = "landlord") => {
+  const sendWhatsApp: Ctx["sendWhatsApp"] = async (tenantId, body, channel = "landlord") => {
     _appendWa(tenantId, "out", body, channel);
+
+    // Send real WhatsApp via server
+    try {
+      await api.sendWhatsApp(tenantId, body, 'out', channel);
+    } catch (e) {
+      console.warn('WhatsApp send failed, message saved locally', e);
+    }
   };
 
-  const recordComplaint: Ctx["recordComplaint"] = ({ tenantId, category, description, priority = "medium", source = "tenant", notify = true }) => {
+  const recordComplaint: Ctx["recordComplaint"] = async ({ tenantId, category, description, priority = "medium", source = "tenant", notify = true }) => {
     const tenant = tenants.find(t => t.id === tenantId);
     const c: Complaint = {
       id: uid("c"),
@@ -289,9 +433,25 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       const body = source === "landlord"
         ? `📝 *Complaint logged on your behalf*\n\nReference: #${ref}\nCategory: ${category}\nDetails: ${description}\n\nWe will address this shortly. Reply MENU for options.`
         : `✅ Complaint logged.\n\nReference: #${ref}\nStatus: Pending\n\nWe will address this as soon as possible.`;
-      _appendWa(tenantId, "out", body, "bot");
+      // Send actual WhatsApp message and add to local state
+      await sendWhatsApp(tenantId, body, "bot");
     }
     return c;
+  };
+
+  const updateComplaintStatus: Ctx["updateComplaintStatus"] = async (id, status) => {
+    try {
+      await api.updateComplaintStatus(id, status);
+      setComplaints(prev => prev.map(c => c.id === id ? { ...c, status } : c));
+    } catch (error) {
+      console.error('Failed to update complaint status:', error);
+      // Still update local state for offline functionality
+      setComplaints(prev => prev.map(c => c.id === id ? { ...c, status } : c));
+    }
+  };
+
+  const updateMaintenanceStatus = (id: string, status: typeof seedMaintenance[number]["status"]) => {
+    setMaintenance(prev => prev.map(m => m.id === id ? { ...m, status } : m));
   };
 
   // ---- Bot logic mirroring server ----
@@ -384,13 +544,84 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   const markAllNotificationsRead = () => setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   const markNotificationRead = (id: string) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
 
+  // Calculate revenue by custom month periods based on collectionMonthStart
+  const calculateRevenueByMonth = useCallback(() => {
+    const monthStart = profile?.collectionMonthStart || 1;
+    const revenueMap = new Map<string, { collected: number; pending: number }>();
+
+    // Generate last 6 custom months (showing current and past 5)
+    for (let i = 5; i >= 0; i--) {
+      const date = new Date();
+      date.setMonth(date.getMonth() - i);
+      const monthKey = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      revenueMap.set(monthKey, { collected: 0, pending: 0 });
+    }
+
+    // Calculate collected from paid payments
+    payments.filter(p => p.status === 'paid').forEach(payment => {
+      const paymentDate = new Date(payment.paidAt);
+      const paymentYear = paymentDate.getFullYear();
+      const paymentMonth = paymentDate.getMonth(); // 0-based
+      const paymentDay = paymentDate.getDate();
+
+      // Determine which collection period this payment belongs to
+      let collectionMonth = paymentMonth;
+      let collectionYear = paymentYear;
+
+      if (paymentDay < monthStart) {
+        // Payment is before the collection start date, so it belongs to previous month's collection
+        collectionMonth = paymentMonth - 1;
+        if (collectionMonth < 0) {
+          collectionMonth = 11;
+          collectionYear = paymentYear - 1;
+        }
+      }
+
+      const monthKey = new Date(collectionYear, collectionMonth).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+
+      if (revenueMap.has(monthKey)) {
+        revenueMap.get(monthKey)!.collected += payment.amount;
+      }
+    });
+
+    // For pending, calculate expected revenue minus collected for each period
+    // This is a simplified approach: pending = total tenant rent - collected for current/future periods
+    const currentDate = new Date();
+    const totalMonthlyRent = tenants.reduce((sum, t) => sum + t.rent, 0);
+
+    revenueMap.forEach((data, monthKey) => {
+      const [monthName, yearStr] = monthKey.split(' ');
+      const monthDate = new Date(`${monthName} 1, ${yearStr}`);
+      const isCurrentOrFuture = monthDate >= new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+
+      if (isCurrentOrFuture) {
+        // For current and future periods, pending = expected - collected
+        data.pending = Math.max(0, totalMonthlyRent - data.collected);
+      } else {
+        // For past periods, pending = 0 (historical)
+        data.pending = 0;
+      }
+    });
+
+    // Convert to array format, sorted by date (oldest first)
+    return Array.from(revenueMap.entries())
+      .map(([month, data]) => ({ month, collected: data.collected, pending: data.pending }))
+      .sort((a, b) => {
+        const [monthA, yearA] = a.month.split(' ');
+        const [monthB, yearB] = b.month.split(' ');
+        const dateA = new Date(`${monthA} 1, ${yearA}`);
+        const dateB = new Date(`${monthB} 1, ${yearB}`);
+        return dateA.getTime() - dateB.getTime();
+      });
+  }, [payments, profile?.collectionMonthStart]);
+
   const value = useMemo<Ctx>(() => {
     const isDemo = mode === "demo";
     return {
       mode, profile, properties, tenants,
-      maintenance: isDemo ? seedMaintenance : [],
+      maintenance,
       messages: isDemo ? seedMessages : [],
-      revenueByMonth: isDemo ? seedRevenue : emptyRevenue,
+      revenueByMonth: isDemo ? seedRevenue : calculateRevenueByMonth(),
       collectionDonut: isDemo
         ? seedDonut
         : [
@@ -401,14 +632,14 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       payments, complaints, notifications, waMessages,
       leaseFilterDays, setLeaseFilterDays, expiringTenants,
       addTenant, addTenantsBulk, addProperty, saveProfile,
-      recordPayment, recordComplaint,
+      recordPayment, recordComplaint, updateComplaintStatus, updateMaintenanceStatus,
       sendWhatsApp, simulateInbound,
       markAllNotificationsRead, markNotificationRead,
       startDemo, startFresh, resetToOwnData,
       needsOnboarding, setNeedsOnboarding,
       tourActive, startTour: () => setTourActive(true), stopTour: () => setTourActive(false),
     };
-  }, [mode, profile, properties, tenants, payments, complaints, notifications, waMessages, leaseFilterDays, needsOnboarding, tourActive, expiringTenants, botProcess]);
+  }, [mode, profile, properties, tenants, payments, complaints, notifications, waMessages, leaseFilterDays, needsOnboarding, tourActive, expiringTenants, botProcess, calculateRevenueByMonth]);
 
   return <DataCtx.Provider value={value}>{children}</DataCtx.Provider>;
 };

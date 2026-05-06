@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -5,21 +6,23 @@ import { useData } from "@/lib/data-store";
 import { StatusPill } from "./Dashboard";
 import { Wrench, Clock, Plus, MessageSquareWarning } from "lucide-react";
 import { RecordComplaintDialog } from "@/components/dialogs/RecordComplaintDialog";
+import { toast } from "@/hooks/use-toast";
 
 const Maintenance = () => {
-  const { maintenance, complaints } = useData();
+  const { maintenance, complaints, updateComplaintStatus, updateMaintenanceStatus } = useData();
+  const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
 
   // Merge demo maintenance + recorded complaints
   const merged = [
     ...maintenance.map(m => ({
       id: m.id, tenantName: m.tenant, unit: m.unit, category: m.category,
       description: m.description, priority: m.priority, status: m.status,
-      created: m.created, source: "tenant" as const,
+      created: m.created, source: "tenant" as const, type: "maintenance" as const,
     })),
     ...complaints.map(c => ({
       id: c.id, tenantName: c.tenantName, unit: c.unit, category: c.category,
       description: c.description, priority: c.priority, status: c.status,
-      created: new Date(c.createdAt).toLocaleDateString("en-KE"), source: c.source,
+      created: new Date(c.createdAt).toLocaleDateString("en-KE"), source: c.source, type: "complaint" as const,
     })),
   ];
 
@@ -60,14 +63,50 @@ const Maintenance = () => {
                     <span className="flex items-center gap-1.5">
                       {m.tenantName}
                       {m.source === "landlord" && <span className="text-[9px] bg-warning/15 text-warning px-1.5 py-0.5 rounded font-bold">VIA LANDLORD</span>}
+                      {m.source === "tenant" && <span className="text-[9px] bg-accent/15 text-accent px-1.5 py-0.5 rounded font-bold">#{m.id.slice(-6).toUpperCase()}</span>}
                     </span>
                     <span className="flex items-center gap-1"><Clock className="size-3" />{m.created}</span>
                   </div>
-                  {col !== "resolved" && (
-                    <Button size="sm" className="w-full mt-3 gradient-primary text-primary-foreground">
-                      <MessageSquareWarning className="size-3.5" /> {col === "pending" ? "Assign contractor" : "Mark resolved"}
-                    </Button>
-                  )}
+                    {col !== "resolved" && (
+                      <Button
+                        size="sm"
+                        className="w-full mt-3 gradient-primary text-primary-foreground"
+                        disabled={updatingIds.has(m.id)}
+                        onClick={async () => {
+                          setUpdatingIds(prev => new Set(prev).add(m.id));
+                          try {
+                            const newStatus = col === "pending" ? "in_progress" : "resolved";
+                            if (m.type === "complaint") {
+                              await updateComplaintStatus(m.id, newStatus);
+                              toast({
+                                title: "Status updated",
+                                description: `Complaint ${newStatus === "in_progress" ? "assigned to contractor" : "marked as resolved"}`,
+                              });
+                            } else if (m.type === "maintenance") {
+                              updateMaintenanceStatus(m.id, newStatus);
+                              toast({
+                                title: "Status updated",
+                                description: `Maintenance ${newStatus === "in_progress" ? "assigned to contractor" : "marked as resolved"}`,
+                              });
+                            }
+                          } catch (error) {
+                            toast({
+                              title: "Update failed",
+                              description: "Failed to update status. Please try again.",
+                              variant: "destructive",
+                            });
+                          } finally {
+                            setUpdatingIds(prev => {
+                              const newSet = new Set(prev);
+                              newSet.delete(m.id);
+                              return newSet;
+                            });
+                          }
+                        }}
+                      >
+                       <MessageSquareWarning className="size-3.5" /> {updatingIds.has(m.id) ? "Updating..." : (col === "pending" ? "Assign contractor" : "Mark resolved")}
+                      </Button>
+                    )}
                 </Card>
               ))}
             </div>

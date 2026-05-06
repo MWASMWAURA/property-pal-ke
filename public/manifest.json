@@ -1,0 +1,42 @@
+{
+  "name": "PropertyHub Kenya",
+  "short_name": "PropertyHub",
+  "description": "Property management for Kenyan landlords",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0f4d36",
+  "orientation": "portrait-primary",
+  "categories": ["business", "productivity"],
+  "lang": "en-KE",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    },
+    {
+      "src": "/placeholder.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Add Tenant",
+      "short_name": "Add Tenant",
+      "description": "Quickly add a new tenant",
+      "url": "/tenants",
+      "icons": [{ "src": "/placeholder.svg", "sizes": "96x96" }]
+    },
+    {
+      "name": "Collections",
+      "short_name": "Collections",
+      "description": "Check rent collections",
+      "url": "/collections",
+      "icons": [{ "src": "/placeholder.svg", "sizes": "96x96" }]
+    }
+  ]
+}

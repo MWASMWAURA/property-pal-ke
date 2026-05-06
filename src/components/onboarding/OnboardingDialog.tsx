@@ -12,7 +12,7 @@ export const OnboardingDialog = () => {
   const { needsOnboarding, setNeedsOnboarding, saveProfile, startDemo, startFresh } = useData();
   const [step, setStep] = useState(0);
   const [profile, setProfile] = useState<LandlordProfile>({
-    name: "", email: "", phone: "", company: "", city: "Nairobi", preferredChannel: "whatsapp",
+    name: "", email: "", phone: "", company: "", city: "Nairobi", preferredChannel: "whatsapp", collectionMonthStart: 1,
   });
 
   const next = () => setStep(s => s + 1);

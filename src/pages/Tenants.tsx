@@ -105,10 +105,10 @@ const Tenants = () => {
                       </div>
                     </div>
                   </div>
-                  <div className="flex gap-2" onClick={e => e.stopPropagation()}>
-                    <Button size="sm" variant="outline" className="flex-1"><MessageCircle className="size-3.5" /> WhatsApp</Button>
-                    <Button size="sm" variant="outline" className="flex-1"><Phone className="size-3.5" /> Call</Button>
-                  </div>
+                   <div className="flex gap-2" onClick={e => e.stopPropagation()}>
+                     <Button size="sm" variant="outline" className="flex-1" onClick={() => t.phone && window.open(`https://wa.me/${t.phone.replace(/\s+/g, '')}`, '_blank')} disabled={!t.phone}><MessageCircle className="size-3.5" /> WhatsApp</Button>
+                     <Button size="sm" variant="outline" className="flex-1" onClick={() => t.phone && window.open(`tel:${t.phone}`)} disabled={!t.phone}><Phone className="size-3.5" /> Call</Button>
+                   </div>
                 </Card>
               } />
             );

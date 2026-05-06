@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,7 +7,8 @@ import { Building2, MapPin, Plus, ArrowUpRight } from "lucide-react";
 import { AddPropertyDialog } from "@/components/dialogs/AddPropertyDialog";
 
 const Properties = () => {
-  const { properties } = useData();
+  const navigate = useNavigate();
+  const { properties, tenants } = useData();
   return (
     <AppShell title="Properties" subtitle={`${properties.length} buildings · ${properties.reduce((s,p)=>s+p.units,0)} total units`}>
       <div className="flex justify-end mb-4">
@@ -26,8 +28,9 @@ const Properties = () => {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {properties.map(p => {
-            const occ = p.units ? (p.occupied / p.units) * 100 : 0;
-            const vacant = p.units - p.occupied;
+            const occupied = tenants.filter(t => t.property === p.name).length;
+            const occ = p.units ? (occupied / p.units) * 100 : 0;
+            const vacant = p.units - occupied;
             return (
               <Card key={p.id} className="overflow-hidden shadow-card border-border/60 group hover:shadow-card-lg transition-all">
                 <div className="h-32 gradient-hero relative">
@@ -43,12 +46,12 @@ const Properties = () => {
                 <div className="p-5">
                   <h3 className="font-bold text-lg">{p.name}</h3>
                   <p className="text-xs text-muted-foreground flex items-center gap-1 mb-4"><MapPin className="size-3"/>{p.location}</p>
-                  <div className="grid grid-cols-3 gap-2 text-center mb-4">
-                    <Stat label="Total" value={p.units}/>
-                    <Stat label="Occupied" value={p.occupied} accent="text-success"/>
-                    <Stat label="Vacant" value={vacant} accent={vacant ? "text-destructive" : "text-muted-foreground"}/>
-                  </div>
-                  <Button variant="outline" className="w-full">View units <ArrowUpRight className="size-3.5"/></Button>
+                   <div className="grid grid-cols-3 gap-2 text-center mb-4">
+                     <Stat label="Total" value={p.units}/>
+                     <Stat label="Occupied" value={occupied} accent="text-success"/>
+                     <Stat label="Vacant" value={vacant} accent={vacant ? "text-destructive" : "text-muted-foreground"}/>
+                   </div>
+                   <Button variant="outline" className="w-full" onClick={() => navigate(`/properties/${p.id}/units`)}>View units <ArrowUpRight className="size-3.5"/></Button>
                 </div>
               </Card>
             );
@@ -59,7 +62,7 @@ const Properties = () => {
   );
 };
 
-const Stat = ({label, value, accent="text-foreground"}:any) => (
+const Stat = ({label, value, accent = "text-foreground"}: { label: string; value: number; accent?: string }) => (
   <div className="rounded-lg bg-muted/40 py-2.5">
     <div className={`font-mono-num font-bold text-lg ${accent}`}>{value}</div>
     <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
