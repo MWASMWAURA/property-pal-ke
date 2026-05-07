@@ -14,7 +14,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(express.static('public'));
+app.use(express.static('dist'));
 
 // Meta WhatsApp Cloud API client (only initialize if credentials exist)
 let metaClient = null;
@@ -1735,7 +1735,7 @@ app.get('/api/export/financials', (req, res) => {
 // ==================== SERVE FRONTEND ====================
 
 app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
 // Start server

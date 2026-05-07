@@ -3024,9 +3024,9 @@ app.get('/api/export/financials', (req, res) => {
 
 // ==================== SERVE FRONTEND ====================
 // Static files MUST come after all API routes
-app.use(express.static('public'));
+app.use(express.static('dist'));
 app.get('/{*path}', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
 // Server start is handled in initializeApp function
