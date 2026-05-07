@@ -63,6 +63,7 @@ const Messages = () => {
         })
         .catch(err => {
           console.error('Failed to load real threads:', err);
+          setRealThreads([]); // Ensure it's always an array
           toast({ title: "No real requests yet", description: "Waiting for tenants to send complaints via WhatsApp..." });
         })
         .finally(() => setLoading(false));
@@ -264,10 +265,10 @@ const Messages = () => {
             <div className="overflow-y-auto flex-1">
               {loading ? (
                 <div className="p-6 text-center text-xs text-muted-foreground">Loading...</div>
-              ) : realThreads.length === 0 ? (
+              ) : !Array.isArray(realThreads) || realThreads.length === 0 ? (
                 <div className="p-6 text-center text-xs text-muted-foreground">No pending requests. Tenants will appear here when they send complaints or maintenance requests via WhatsApp.</div>
               ) : (
-                realThreads.filter(t => !search || t.tenantName.toLowerCase().includes(search.toLowerCase())).map(thread => (
+                (realThreads || []).filter(t => !search || t.tenantName.toLowerCase().includes(search.toLowerCase())).map(thread => (
                   <button
                     key={thread.id}
                     onClick={() => setSelectedRealThread(thread)}

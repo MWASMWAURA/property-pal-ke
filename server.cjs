@@ -44,10 +44,11 @@ if (metaPhoneNumberId && metaAccessToken) {
 // Database connection - supports both Supabase and local PostgreSQL
 const { Pool } = require('pg');
 let db;
+let isSQLite = false;
 
 if (process.env.DATABASE_URL) {
-    // Supabase connection
-    db = new Pool({
+    // Try Supabase connection first
+    const testPool = new Pool({
         connectionString: process.env.DATABASE_URL,
         ssl: {
             rejectUnauthorized: false // Required for Supabase
@@ -55,91 +56,28 @@ if (process.env.DATABASE_URL) {
     });
 
     // Test connection
-    db.connect()
-        .then(() => console.log('✅ Supabase PostgreSQL database connected'))
-        .catch(err => {
-            console.error('❌ Supabase connection failed:', err.message);
-            console.log('💡 Falling back to local SQLite...');
+    try {
+        await testPool.connect();
+        console.log('✅ Supabase PostgreSQL database connected');
+        db = testPool;
+        isSQLite = false;
+    } catch (err) {
+        console.error('❌ Supabase connection failed:', err.message);
+        console.log('💡 Falling back to local SQLite...');
 
-            // Fallback to SQLite if Supabase fails
-            const Database = require('better-sqlite3');
-            db = new Database('propertyhub.db');
-            console.log('✅ SQLite database initialized (fallback mode)');
-
-            // Override query methods for SQLite compatibility
-            db.query = (sql, params = []) => {
-                try {
-                    if (sql.trim().toUpperCase().startsWith('SELECT')) {
-                        return { rows: db.prepare(sql).all(params) };
-                    } else {
-                        const stmt = db.prepare(sql);
-                        const result = stmt.run(params);
-                        return { rowCount: result.changes };
-                    }
-                } catch (error) {
-                    console.error('SQLite query error:', error);
-                    throw error;
-                }
-            };
-
-            db.queryOne = (sql, params = []) => {
-                try {
-                    return db.prepare(sql).get(params);
-                } catch (error) {
-                    console.error('SQLite queryOne error:', error);
-                    throw error;
-                }
-            };
-
-            db.queryAll = (sql, params = []) => {
-                try {
-                    return db.prepare(sql).all(params);
-                } catch (error) {
-                    console.error('SQLite queryAll error:', error);
-                    throw error;
-                }
-            };
-        });
+        // Fallback to SQLite if Supabase fails
+        const Database = require('better-sqlite3');
+        db = new Database('propertyhub.db');
+        isSQLite = true;
+        console.log('✅ SQLite database initialized (fallback mode)');
+    }
 } else {
     // Local SQLite fallback
     console.log('⚠️  No DATABASE_URL found, using local SQLite storage');
     const Database = require('better-sqlite3');
     db = new Database('propertyhub.db');
+    isSQLite = true;
     console.log('✅ SQLite database initialized');
-
-    // Add query methods for compatibility
-    db.query = (sql, params = []) => {
-        try {
-            if (sql.trim().toUpperCase().startsWith('SELECT')) {
-                return { rows: db.prepare(sql).all(params) };
-            } else {
-                const stmt = db.prepare(sql);
-                const result = stmt.run(params);
-                return { rowCount: result.changes };
-            }
-        } catch (error) {
-            console.error('SQLite query error:', error);
-            throw error;
-        }
-    };
-
-    db.queryOne = (sql, params = []) => {
-        try {
-            return db.prepare(sql).get(params);
-        } catch (error) {
-            console.error('SQLite queryOne error:', error);
-            throw error;
-        }
-    };
-
-    db.queryAll = (sql, params = []) => {
-        try {
-            return db.prepare(sql).all(params);
-        } catch (error) {
-            console.error('SQLite queryAll error:', error);
-            throw error;
-        }
-    };
 }
 
 // JWT and bcrypt for authentication
@@ -450,7 +388,7 @@ const normalizePropertyRow = (row) => ({
 // Helper functions for database queries (works with both PostgreSQL and SQLite)
 const query = async (sql, params = []) => {
     try {
-        if (db.constructor.name === 'Database') {
+        if (isSQLite) {
             // SQLite mode
             if (sql.trim().toUpperCase().startsWith('SELECT')) {
                 return { rows: db.prepare(sql).all(params) };
@@ -471,7 +409,7 @@ const query = async (sql, params = []) => {
 
 const queryOne = async (sql, params = []) => {
     try {
-        if (db.constructor.name === 'Database') {
+        if (isSQLite) {
             // SQLite mode
             return db.prepare(sql).get(params) || null;
         } else {
@@ -487,7 +425,7 @@ const queryOne = async (sql, params = []) => {
 
 const queryAll = async (sql, params = []) => {
     try {
-        if (db.constructor.name === 'Database') {
+        if (isSQLite) {
             // SQLite mode
             return db.prepare(sql).all(params);
         } else {
@@ -1634,22 +1572,26 @@ app.post('/api/whatsapp/send', async (req, res) => {
 });
 
 // Get real tenant threads with pending complaints/maintenance
-app.get('/api/whatsapp/threads', (req, res) => {
+app.get('/api/whatsapp/threads', async (req, res) => {
     try {
         // Get all pending complaints/maintenance from WhatsApp
-        const complaints = db.prepare(`
-            SELECT * FROM complaints 
+        const complaintsResult = await query(`
+            SELECT * FROM complaints
             WHERE source = 'whatsapp' AND status = 'pending'
             ORDER BY created_at DESC
-        `).all();
+        `);
 
-        const threads = complaints.map(complaint => {
+        const complaints = complaintsResult.rows || complaintsResult;
+
+        const threads = await Promise.all(complaints.map(async (complaint) => {
             // Get all messages in the thread related to this complaint
-            const messages = db.prepare(`
-                SELECT * FROM wa_messages 
-                WHERE tenant_id = ?
+            const messagesResult = await query(`
+                SELECT * FROM wa_messages
+                WHERE tenant_id = $1
                 ORDER BY timestamp ASC
-            `).all(complaint.tenant_id);
+            `, [complaint.tenant_id]);
+
+            const messages = messagesResult.rows || messagesResult;
 
             return {
                 id: complaint.id,
@@ -1670,7 +1612,7 @@ app.get('/api/whatsapp/threads', (req, res) => {
                     channel: m.channel
                 }))
             };
-        });
+        }));
 
         res.json(threads);
     } catch (error) {
@@ -1680,32 +1622,36 @@ app.get('/api/whatsapp/threads', (req, res) => {
 });
 
 // Get messages for a specific tenant (real thread)
-app.get('/api/whatsapp/thread/:tenantId', (req, res) => {
+app.get('/api/whatsapp/thread/:tenantId', async (req, res) => {
     try {
         const tenantId = req.params.tenantId;
-        const messages = db.prepare(`
-            SELECT * FROM wa_messages 
-            WHERE tenant_id = ?
+
+        // Get messages for this tenant
+        const messagesResult = await query(`
+            SELECT * FROM wa_messages
+            WHERE tenant_id = $1
             ORDER BY timestamp ASC
-        `).all(tenantId);
+        `, [tenantId]);
+
+        const messages = messagesResult.rows || messagesResult;
 
         // Get related complaint/maintenance
-        const complaint = db.prepare(`
-            SELECT * FROM complaints 
-            WHERE tenant_id = ? AND source = 'whatsapp'
+        const complaintResult = await queryOne(`
+            SELECT * FROM complaints
+            WHERE tenant_id = $1 AND source = 'whatsapp'
             ORDER BY created_at DESC
             LIMIT 1
-        `).get(tenantId);
+        `, [tenantId]);
 
         res.json({
             tenantId,
-            complaint: complaint ? {
-                id: complaint.id,
-                category: complaint.category,
-                description: complaint.description,
-                priority: complaint.priority,
-                status: complaint.status,
-                createdAt: complaint.created_at
+            complaint: complaintResult ? {
+                id: complaintResult.id,
+                category: complaintResult.category,
+                description: complaintResult.description,
+                priority: complaintResult.priority,
+                status: complaintResult.status,
+                createdAt: complaintResult.created_at
             } : null,
             messages: messages.map(m => ({
                 id: m.id,
@@ -1714,6 +1660,7 @@ app.get('/api/whatsapp/thread/:tenantId', (req, res) => {
                 timestamp: m.timestamp,
                 channel: m.channel
             }))
+
         });
     } catch (error) {
         console.error('Error fetching thread:', error);
@@ -1731,12 +1678,12 @@ app.post('/api/whatsapp/reply', async (req, res) => {
             return res.status(400).json({ error: 'Tenant ID and message are required' });
         }
 
-        // Look up tenant in memory first, then SQLite
+        // Look up tenant in memory first, then database
         let tenant = tenants.find(t => t.id === tenantId);
         if (!tenant) {
             try {
-                const row = db.prepare('SELECT * FROM tenants WHERE id = ?').get(tenantId);
-                if (row) tenant = normalizeTenantRow(row);
+                const tenantResult = await queryOne('SELECT * FROM tenants WHERE id = $1', [tenantId]);
+                if (tenantResult) tenant = normalizeTenantRow(tenantResult);
             } catch(e) {}
         }
 
@@ -1756,16 +1703,15 @@ app.post('/api/whatsapp/reply', async (req, res) => {
                 body: message, timestamp, channel: 'landlord',
             });
 
-            // Try SQLite
+            // Try database
             try {
-                db.prepare(`
+                await query(`
                     INSERT INTO wa_messages (id, tenant_id, direction, body, timestamp, channel, meta_message_id)
-                    VALUES (?, ?, 'out', ?, ?, 'landlord', ?)
-                `).run(msgId, tenantId, message, timestamp, result.messageId || '');
+                    VALUES ($1, $2, 'out', $3, $4, 'landlord', $5)
+                `, [msgId, tenantId, message, timestamp, result.messageId || '']);
 
                 if (complaintId) {
-                    db.prepare('UPDATE complaints SET status = ? WHERE id = ?')
-                      .run('in_progress', complaintId);
+                    await query('UPDATE complaints SET status = $1 WHERE id = $2', ['in_progress', complaintId]);
                 }
             } catch(e) {}
 
@@ -1940,19 +1886,34 @@ app.get('/api/notifications', (req, res) => {
     res.json(notifications);
 });
 
-app.get('/api/sync/properties', (req, res) => {
-    const rows = db.prepare('SELECT * FROM properties').all().map(normalizePropertyRow);
-    res.json(rows);
+app.get('/api/sync/properties', async (req, res) => {
+    try {
+        const rows = await queryAll('SELECT * FROM properties');
+        res.json(rows.map(normalizePropertyRow));
+    } catch (error) {
+        console.error('Error fetching properties:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
-app.get('/api/sync/tenants', (req, res) => {
-    const rows = db.prepare('SELECT * FROM tenants').all().map(normalizeTenantRow);
-    res.json(rows);
+app.get('/api/sync/tenants', async (req, res) => {
+    try {
+        const rows = await queryAll('SELECT * FROM tenants');
+        res.json(rows.map(normalizeTenantRow));
+    } catch (error) {
+        console.error('Error fetching tenants:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
-app.get('/api/sync/payments', (req, res) => {
-    const rows = db.prepare('SELECT * FROM payments').all().map(normalizePaymentRow);
-    res.json(rows);
+app.get('/api/sync/payments', async (req, res) => {
+    try {
+        const rows = await queryAll('SELECT * FROM payments');
+        res.json(rows.map(normalizePaymentRow));
+    } catch (error) {
+        console.error('Error fetching payments:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // Get complaints for authenticated landlord
@@ -1979,9 +1940,14 @@ app.get('/api/sync/notifications', async (req, res) => {
     }
 });
 
-app.get('/api/sync/whatsapp', (req, res) => {
-    const rows = db.prepare('SELECT * FROM wa_messages').all().map(normalizeWaMessageRow);
-    res.json(rows);
+app.get('/api/sync/whatsapp', async (req, res) => {
+    try {
+        const rows = await queryAll('SELECT * FROM wa_messages');
+        res.json(rows.map(normalizeWaMessageRow));
+    } catch (error) {
+        console.error('Error fetching wa messages:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // ==================== AUTHENTICATION ROUTES ====================
