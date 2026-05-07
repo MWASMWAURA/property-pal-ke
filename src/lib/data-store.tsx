@@ -5,6 +5,9 @@ import {
   tenants as seedTenants,
   maintenance as seedMaintenance,
   payments as seedPayments,
+  messages as seedMessages,
+  revenueByMonth as seedRevenue,
+  collectionDonut as seedDonut,
   formatKsh,
   TenantStatus,
 } from "./mock-data";

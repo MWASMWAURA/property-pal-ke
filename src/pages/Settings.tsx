@@ -70,13 +70,14 @@ const Settings = () => {
 
             <div className="space-y-2">
               <Label htmlFor="phone" className="flex items-center gap-2">
-                <Phone className="size-4" /> Phone
+                <Phone className="size-4" /> Phone ✓ Verified
               </Label>
               <Input
                 id="phone"
                 value={form.phone}
                 onChange={e => setForm({...form, phone: e.target.value})}
                 placeholder="+254 712 345 678"
+                disabled={true}
               />
             </div>
 

@@ -62,7 +62,7 @@ const faqs = [
 
 const Pricing = () => {
   const [authOpen, setAuthOpen] = useState(false);
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authMode, setAuthMode] = useState<"login" | "register" | "forgot-password">("login");
 
   const openLogin = () => {
     setAuthMode("login");

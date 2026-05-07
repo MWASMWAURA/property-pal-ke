@@ -16,6 +16,7 @@ import Settings from "./pages/Settings.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import Landing from "./pages/Landing.tsx";
 import Pricing from "./pages/Pricing.tsx";
+import ResetPassword from "./pages/ResetPassword.tsx";
 import { DataProvider, useData } from "./lib/data-store";
 import { OnboardingDialog } from "./components/onboarding/OnboardingDialog";
 import { TourGuide } from "./components/onboarding/TourGuide";
@@ -44,6 +45,7 @@ const AppRoutes = () => {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/pricing" element={<Pricing />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     );

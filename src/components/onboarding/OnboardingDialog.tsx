@@ -14,6 +14,7 @@ export const OnboardingDialog = () => {
   const [profile, setProfile] = useState<LandlordProfile>(currentProfile || {
     name: "", email: "", phone: "", company: "", city: "Nairobi", preferredChannel: "whatsapp", collectionMonthStart: 1,
   });
+  const [phoneVerified, setPhoneVerified] = useState(!!currentProfile?.phone); // Assume phone is verified if profile exists
 
   const next = () => setStep(s => s + 1);
   const back = () => setStep(s => Math.max(0, s - 1));
@@ -54,10 +55,15 @@ export const OnboardingDialog = () => {
                   <Label>Email</Label>
                   <Input type="email" value={profile.email} onChange={e => setProfile({...profile, email: e.target.value})} placeholder="you@example.com"/>
                 </div>
-                <div className="space-y-2">
-                  <Label>Phone</Label>
-                  <Input value={profile.phone} onChange={e => setProfile({...profile, phone: e.target.value})} placeholder="+254 …"/>
-                </div>
+                  <div className="space-y-2">
+                    <Label>Phone {phoneVerified && "✓ Verified"}</Label>
+                    <Input
+                      value={profile.phone}
+                      onChange={e => !phoneVerified && setProfile({...profile, phone: e.target.value})}
+                      placeholder="+254 …"
+                      disabled={phoneVerified}
+                    />
+                  </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-2">

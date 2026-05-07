@@ -76,4 +76,8 @@ export const api = {
   // Update complaint status
   updateComplaintStatus: (complaintId: string, status: string) =>
     put(`/api/complaints/${complaintId}`, { status }),
+
+  // OTP functions
+  sendOTP: (phone: string, purpose?: string) => post('/api/auth/send-otp', { phone, purpose }),
+  verifyOTP: (phone: string, code: string) => post('/api/auth/verify-otp', { phone, code }),
 };

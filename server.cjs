@@ -3,9 +3,13 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const path = require('path');
 const dotenv = require('dotenv');
+const { Resend } = require('resend');
 
 // Load environment variables
 dotenv.config();
+
+// Initialize Resend for email
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -46,39 +50,7 @@ const { Pool } = require('pg');
 let db;
 let isSQLite = false;
 
-if (process.env.DATABASE_URL) {
-    // Try Supabase connection first
-    const testPool = new Pool({
-        connectionString: process.env.DATABASE_URL,
-        ssl: {
-            rejectUnauthorized: false // Required for Supabase
-        }
-    });
 
-    // Test connection
-    try {
-        await testPool.connect();
-        console.log('✅ Supabase PostgreSQL database connected');
-        db = testPool;
-        isSQLite = false;
-    } catch (err) {
-        console.error('❌ Supabase connection failed:', err.message);
-        console.log('💡 Falling back to local SQLite...');
-
-        // Fallback to SQLite if Supabase fails
-        const Database = require('better-sqlite3');
-        db = new Database('propertyhub.db');
-        isSQLite = true;
-        console.log('✅ SQLite database initialized (fallback mode)');
-    }
-} else {
-    // Local SQLite fallback
-    console.log('⚠️  No DATABASE_URL found, using local SQLite storage');
-    const Database = require('better-sqlite3');
-    db = new Database('propertyhub.db');
-    isSQLite = true;
-    console.log('✅ SQLite database initialized');
-}
 
 // JWT and bcrypt for authentication
 const jwt = require('jsonwebtoken');
@@ -86,6 +58,139 @@ const bcrypt = require('bcryptjs');
 
 // JWT secret - in production, use environment variable
 const JWT_SECRET = process.env.JWT_SECRET || 'propertyhub_kenya_secret_2026';
+
+// SMS API client
+const sendSMS = async (to, message) => {
+  const formattedPhone = kenyaUtils.formatPhone(to).replace('+', '');
+  console.log(`📱 Attempting to send SMS to ${formattedPhone}`);
+
+  if (!process.env.SMS_API_TOKEN) {
+    console.log(`[SIMULATED SMS] To: ${formattedPhone}, Message: ${message}`);
+    return { success: true, simulated: true };
+  }
+
+  try {
+    console.log(`📤 Sending real SMS via Talksasa API...`);
+    const response = await fetch('https://bulksms.talksasa.com/api/v3/sms/send', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.SMS_API_TOKEN}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        recipient: formattedPhone,
+        sender_id: process.env.SMS_SENDER_ID || 'TALK-SASA',
+        type: 'plain',
+        message: message
+      })
+    });
+
+    console.log(`📥 SMS API Response Status: ${response.status}`);
+    const result = await response.json();
+    console.log(`📥 SMS API Response:`, result);
+
+    return { success: result.status === 'success', ...result };
+  } catch (error) {
+    console.error('❌ SMS send error:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Generate OTP code
+const generateOTP = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
+// Send OTP for phone verification
+const sendOTP = async (phone, purpose = 'registration') => {
+  const code = generateOTP();
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+  const normalizedPhone = kenyaUtils.formatPhone(phone);
+
+  console.log(`📤 Sending OTP to phone: ${phone} -> ${normalizedPhone}, code: ${code}`);
+
+  try {
+    // Store OTP in database
+    const otpId = generateId();
+    if (isSQLite) {
+      db.prepare(`
+        INSERT OR REPLACE INTO otp_codes (id, phone, code, purpose, expires_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(otpId, normalizedPhone, code, purpose, expiresAt.toISOString());
+    } else {
+      await db.query(`
+        INSERT INTO otp_codes (id, phone, code, purpose, expires_at)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (phone) DO UPDATE SET
+        code = EXCLUDED.code,
+        purpose = EXCLUDED.purpose,
+        expires_at = EXCLUDED.expires_at,
+        used = false,
+        created_at = NOW()
+      `, [otpId, normalizedPhone, code, purpose, expiresAt]);
+    }
+
+    console.log(`💾 OTP stored in database for ${normalizedPhone}`);
+
+    // Send SMS
+    const message = `PropertyHub Kenya: Your verification code is ${code}. Valid for 10 minutes.`;
+    const smsResult = await sendSMS(phone, message);
+
+    return { success: smsResult.success, code: smsResult.simulated ? code : undefined };
+  } catch (error) {
+    console.error('❌ OTP send error:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Verify OTP code
+const verifyOTP = async (phone, code) => {
+  try {
+    const normalizedPhone = kenyaUtils.formatPhone(phone);
+    const now = new Date().toISOString();
+
+    console.log(`🔍 Verifying OTP: phone=${normalizedPhone}, code=${code}, dbType=${isSQLite ? 'SQLite' : 'PostgreSQL'}`);
+
+    let otpRecord;
+    if (isSQLite) {
+      otpRecord = db.prepare(`
+        SELECT * FROM otp_codes
+        WHERE phone = ? AND code = ? AND expires_at > ? AND used = 0
+        ORDER BY created_at DESC LIMIT 1
+      `).get(normalizedPhone, code, now);
+    } else {
+      const result = await db.query(`
+        SELECT * FROM otp_codes
+        WHERE phone = $1 AND code = $2 AND expires_at > $3 AND used = false
+        ORDER BY created_at DESC LIMIT 1
+      `, [normalizedPhone, code, now]);
+      otpRecord = result.rows[0];
+    }
+
+    console.log(`📋 OTP Record found:`, otpRecord ? 'Yes' : 'No');
+
+    if (!otpRecord) {
+      console.log(`❌ No valid OTP found for phone ${normalizedPhone}`);
+      return { success: false, error: 'Invalid or expired code' };
+    }
+
+    console.log(`✅ OTP verified for phone ${normalizedPhone}`);
+
+    // Mark as used
+    if (isSQLite) {
+      db.prepare('UPDATE otp_codes SET used = 1 WHERE id = ?').run(otpRecord.id);
+    } else {
+      await db.query('UPDATE otp_codes SET used = true WHERE id = $1', [otpRecord.id]);
+    }
+
+    console.log(`🔄 OTP marked as used`);
+    return { success: true };
+  } catch (error) {
+    console.error('❌ OTP verification error:', error);
+    return { success: false, error: error.message };
+  }
+};
 
 // Authentication middleware
 const authenticateToken = (req, res, next) => {
@@ -232,6 +337,25 @@ const initDatabase = async () => {
                     status TEXT,
                     FOREIGN KEY (landlord_id) REFERENCES landlords(id)
                 );
+
+                CREATE TABLE IF NOT EXISTS otp_codes (
+                    id TEXT PRIMARY KEY,
+                    phone TEXT UNIQUE NOT NULL,
+                    code TEXT NOT NULL,
+                    purpose TEXT NOT NULL, -- 'registration' or 'verification'
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TEXT NOT NULL,
+                    used INTEGER DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                    id TEXT PRIMARY KEY,
+                    email TEXT NOT NULL,
+                    token TEXT UNIQUE NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    used INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
             `);
             console.log('✅ SQLite database tables created/verified with landlord support');
         } else {
@@ -345,7 +469,7 @@ const initDatabase = async () => {
                     type TEXT,
                     title TEXT,
                     body TEXT,
-                    created_at TEXT,
+                    created_at TIMESTAMP DEFAULT NOW(),
                     read BOOLEAN DEFAULT false,
                     recipient TEXT,
                     message TEXT,
@@ -353,6 +477,30 @@ const initDatabase = async () => {
                     status TEXT
                 );
             `);
+
+            await db.query(`
+                CREATE TABLE IF NOT EXISTS otp_codes (
+                    id TEXT PRIMARY KEY,
+                    phone TEXT UNIQUE NOT NULL,
+                    code TEXT NOT NULL,
+                    purpose TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    expires_at TIMESTAMP NOT NULL,
+                    used BOOLEAN DEFAULT false
+                );
+            `);
+
+            await db.query(`
+                CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                    id TEXT PRIMARY KEY,
+                    email TEXT NOT NULL,
+                    token TEXT UNIQUE NOT NULL,
+                    expires_at TIMESTAMP NOT NULL,
+                    used BOOLEAN DEFAULT false,
+                    created_at TIMESTAMP DEFAULT NOW()
+                );
+            `);
+            console.log('✅ Password reset tokens table created/verified');
 
             console.log('✅ PostgreSQL database tables created/verified with landlord support');
         }
@@ -363,10 +511,52 @@ const initDatabase = async () => {
 };
 
 // Initialize database and load data
-(async () => {
-  await initDatabase();
-  await loadDatabaseData();
-})();
+const initializeApp = async () => {
+  try {
+    console.log('🚀 Initializing PropertyHub Kenya server...');
+    console.log(`📱 SMS Token configured: ${process.env.SMS_API_TOKEN ? '✅ Yes' : '❌ No'}`);
+    console.log(`📱 SMS Sender ID: ${process.env.SMS_SENDER_ID || 'TALK-SASA'}`);
+
+    if (process.env.DATABASE_URL) {
+      // Try Supabase connection first
+      const testPool = new Pool({
+          connectionString: process.env.DATABASE_URL,
+          ssl: {
+              rejectUnauthorized: false // Required for Supabase
+          }
+      });
+
+      // Test connection
+      await testPool.connect();
+      console.log('✅ Supabase PostgreSQL database connected');
+      db = testPool;
+      isSQLite = false;
+    } else {
+      // Local SQLite fallback
+      console.log('⚠️  No DATABASE_URL found, using local SQLite storage');
+      const Database = require('better-sqlite3');
+      db = new Database('propertyhub.db');
+      isSQLite = true;
+      console.log('✅ SQLite database initialized');
+    }
+
+    await initDatabase();
+    await loadDatabaseData();
+
+    // Start server only after database is ready
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, () => {
+      console.log(`🏠 PropertyHub Kenya running on http://localhost:${PORT}`);
+      console.log(`📱 WhatsApp Integration: ${metaClient ? '✅ Active' : '⚠️  Simulated (no credentials)'}`);
+      console.log(`📱 SMS OTP: ${process.env.SMS_API_TOKEN ? '✅ Active' : '⚠️  Simulated (no token)'}`);
+    });
+  } catch (error) {
+    console.error('❌ Failed to initialize application:', error);
+    process.exit(1);
+  }
+};
+
+initializeApp();
 
 const loadJson = (value, fallback) => {
   if (value == null) return fallback;
@@ -1950,6 +2140,65 @@ app.get('/api/sync/whatsapp', async (req, res) => {
     }
 });
 
+// ==================== OTP ROUTES ====================
+
+// Send OTP for phone verification
+app.post('/api/auth/send-otp', async (req, res) => {
+  try {
+    const { phone, purpose } = req.body;
+    console.log(`📨 Send OTP request: phone=${phone}, purpose=${purpose}`);
+
+    if (!phone) {
+      console.log(`❌ Phone number missing`);
+      return res.status(400).json({ error: 'Phone number is required' });
+    }
+
+    if (!kenyaUtils.isValidKenyanPhone(phone)) {
+      console.log(`❌ Invalid Kenyan phone: ${phone}`);
+      return res.status(400).json({ error: 'Invalid Kenyan phone number' });
+    }
+
+    const result = await sendOTP(phone, purpose || 'registration');
+
+    if (result.success) {
+      console.log(`✅ OTP sent successfully to ${phone}`);
+      res.json({ success: true, message: 'OTP sent successfully' });
+    } else {
+      console.log(`❌ Failed to send OTP: ${result.error}`);
+      res.status(500).json({ error: result.error || 'Failed to send OTP' });
+    }
+  } catch (error) {
+    console.error('❌ Send OTP endpoint error:', error);
+    res.status(500).json({ error: 'Failed to send OTP' });
+  }
+});
+
+// Verify OTP code
+app.post('/api/auth/verify-otp', async (req, res) => {
+  try {
+    const { phone, code } = req.body;
+    console.log(`📨 Verify OTP request: phone=${phone}, code=${code}`);
+
+    if (!phone || !code) {
+      console.log(`❌ Missing required fields: phone=${!!phone}, code=${!!code}`);
+      return res.status(400).json({ error: 'Phone and code are required' });
+    }
+
+    const result = await verifyOTP(phone, code);
+
+    if (result.success) {
+      console.log(`✅ OTP verification successful for ${phone}`);
+      res.json({ success: true, message: 'Phone verified successfully' });
+    } else {
+      console.log(`❌ OTP verification failed: ${result.error}`);
+      res.status(400).json({ error: result.error || 'Invalid verification code' });
+    }
+  } catch (error) {
+    console.error('❌ Verify OTP endpoint error:', error);
+    res.status(500).json({ error: 'Failed to verify OTP' });
+  }
+});
+
 // ==================== AUTHENTICATION ROUTES ====================
 
 // Landlord registration
@@ -2073,6 +2322,121 @@ app.post('/api/auth/login', async (req, res) => {
     } catch (error) {
         console.error('Login error:', error);
         res.status(500).json({ error: 'Login failed' });
+    }
+});
+
+// Send password reset email
+app.post('/api/auth/forgot-password', async (req, res) => {
+    try {
+        const { email } = req.body;
+
+        if (!email) {
+            return res.status(400).json({ error: 'Email is required' });
+        }
+
+        // Check if landlord exists
+        const landlord = await queryOne('SELECT id, name, email FROM landlords WHERE email = $1', [email]);
+        if (!landlord) {
+            // Don't reveal if email exists or not for security
+            return res.json({ success: true, message: 'If the email exists, a reset link has been sent.' });
+        }
+
+        // Generate reset token
+        const resetToken = generateId();
+        const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
+
+        // Store reset token
+        await query(
+            `INSERT INTO password_reset_tokens (id, email, token, expires_at)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (email) DO UPDATE SET
+             token = EXCLUDED.token,
+             expires_at = EXCLUDED.expires_at,
+             used = false,
+             created_at = NOW()`,
+            [generateId(), email, resetToken, expiresAt]
+        );
+
+        // Send reset email using Resend
+        if (process.env.RESEND_API_KEY) {
+            const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password?token=${resetToken}`;
+
+            const { data, error } = await resend.emails.send({
+                from: 'PropertyHub Kenya <noreply@propertyhubke.com>',
+                to: [email],
+                subject: 'Reset Your Password - PropertyHub Kenya',
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                        <h2 style="color: #2563eb;">Reset Your Password</h2>
+                        <p>Hello ${landlord.name},</p>
+                        <p>You requested to reset your password for your PropertyHub Kenya account.</p>
+                        <p>Click the link below to reset your password:</p>
+                        <p style="margin: 20px 0;">
+                            <a href="${resetUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Reset Password</a>
+                        </p>
+                        <p>This link will expire in 1 hour for security reasons.</p>
+                        <p>If you didn't request this password reset, please ignore this email.</p>
+                        <p>Best regards,<br>PropertyHub Kenya Team</p>
+                    </div>
+                `
+            });
+
+            if (error) {
+                console.error('Resend error:', error);
+                return res.status(500).json({ error: 'Failed to send reset email' });
+            }
+        } else {
+            console.log(`[SIMULATED] Password reset email sent to ${email} with token: ${resetToken}`);
+        }
+
+        res.json({ success: true, message: 'If the email exists, a reset link has been sent.' });
+
+    } catch (error) {
+        console.error('Forgot password error:', error);
+        res.status(500).json({ error: 'Failed to process request' });
+    }
+});
+
+// Reset password with token
+app.post('/api/auth/reset-password', async (req, res) => {
+    try {
+        const { token, newPassword } = req.body;
+
+        if (!token || !newPassword) {
+            return res.status(400).json({ error: 'Token and new password are required' });
+        }
+
+        // Find valid reset token
+        const resetToken = await queryOne(
+            'SELECT * FROM password_reset_tokens WHERE token = $1 AND expires_at > NOW() AND used = false',
+            [token]
+        );
+
+        if (!resetToken) {
+            return res.status(400).json({ error: 'Invalid or expired reset token' });
+        }
+
+        // Hash new password
+        const saltRounds = 10;
+        const passwordHash = await bcrypt.hash(newPassword, saltRounds);
+
+        // Update landlord password
+        await query(
+            'UPDATE landlords SET password_hash = $1, updated_at = NOW() WHERE email = $2',
+            [passwordHash, resetToken.email]
+        );
+
+        // Mark token as used
+        await query(
+            'UPDATE password_reset_tokens SET used = true WHERE id = $1',
+            [resetToken.id]
+        );
+
+        res.json({ success: true, message: 'Password reset successfully' });
+
+    } catch (error) {
+        console.error('Reset password error:', error);
+        res.status(500).json({ error: 'Failed to reset password' });
     }
 });
 
@@ -2665,10 +3029,6 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Start server
-app.listen(PORT, () => {
-    console.log(`🏠 PropertyHub Kenya running on http://localhost:${PORT}`);
-    console.log(`📱 WhatsApp Integration: ${metaClient ? '✅ Active' : '⚠️  Simulated (no credentials)'}`);
-});
+// Server start is handled in initializeApp function
 
 module.exports = app;
