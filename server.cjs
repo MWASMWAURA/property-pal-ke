@@ -3025,7 +3025,7 @@ app.get('/api/export/financials', (req, res) => {
 // ==================== SERVE FRONTEND ====================
 // Static files MUST come after all API routes
 app.use(express.static('public'));
-app.get('*', (req, res) => {
+app.get('(.*)', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
