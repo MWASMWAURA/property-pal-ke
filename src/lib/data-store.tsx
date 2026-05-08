@@ -498,9 +498,45 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       status: "paid",
       ...p,
     };
-    setPayments(prev => [payment, ...prev]);
-    // mark tenant as paid
-    setTenants(prev => prev.map(t => t.id === p.tenantId ? { ...t, status: "paid" as TenantStatus } : t));
+
+    // Update payments first
+    setPayments(prev => {
+      const newPayments = [payment, ...prev];
+
+      // Then update tenant status based on total payments vs rent
+      setTenants(prevTenants => prevTenants.map(t => {
+        if (t.id === p.tenantId) {
+          // Calculate total paid for this tenant (including new payment)
+          const tenantPayments = newPayments.filter(pay => pay.tenantId === t.id);
+          const totalPaid = tenantPayments.reduce((sum, pay) => sum + pay.amount, 0);
+
+          // Update status based on payment progress
+          let newStatus: TenantStatus;
+          if (totalPaid >= t.rent) {
+            newStatus = "paid"; // Fully paid or overpaid
+          } else if (t.status === "overdue") {
+            newStatus = "overdue"; // Keep overdue status
+          } else {
+            newStatus = "pending";
+          }
+
+          // Notify about overpayments
+          if (totalPaid > t.rent) {
+            const overpayment = totalPaid - t.rent;
+            pushNotification({
+              type: "payment",
+              title: "Overpayment detected",
+              body: `${t.name} overpaid by ${formatKsh(overpayment)} - will be credited to next period`,
+            });
+          }
+
+          return { ...t, status: newStatus };
+        }
+        return t;
+      }));
+
+      return newPayments;
+    });
     pushNotification({
       type: "payment",
       title: "Payment recorded",
@@ -516,7 +552,9 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
     // Keep local WA thread updated for the Messages page
     if (tenant?.phone) {
-      const body = `✅ *Payment Confirmed!*\n\nAmount: ${formatKsh(p.amount)}\nPeriod: ${p.period}\nDate: ${new Date(payment.paidAt).toLocaleDateString("en-KE")}\n\nThank you for your payment!`;
+      const totalPaid = payments.filter(pay => pay.tenantId === tenant.id).reduce((sum, pay) => sum + pay.amount, 0) + p.amount;
+      const overpayment = Math.max(0, totalPaid - tenant.rent);
+      const body = `✅ *Payment Confirmed!*\n\nAmount: ${formatKsh(p.amount)}\nPeriod: ${p.period}\nDate: ${new Date(payment.paidAt).toLocaleDateString("en-KE")}\n${overpayment > 0 ? `💰 Overpayment: ${formatKsh(overpayment)} (credited to next period)\n` : ''}\nThank you for your payment!`;
       _appendWa(p.tenantId, "out", body, "bot");
     }
   };
@@ -670,15 +708,43 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   const markAllNotificationsRead = () => setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   const markNotificationRead = (id: string) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
 
+  // Calculate collection donut data based on tenant balances
+  const calculateCollectionDonut = useCallback(() => {
+    return tenants.reduce((acc, tenant) => {
+      // Calculate total paid for this tenant
+      const tenantPayments = payments.filter(p => p.tenantId === tenant.id);
+      const totalPaid = tenantPayments.reduce((sum, p) => sum + p.amount, 0);
+      const outstanding = Math.max(0, tenant.rent - totalPaid);
+
+      // Always add all payments received to collected
+      acc[0].value += totalPaid;
+
+      // Add outstanding balances to appropriate categories
+      if (outstanding > 0) {
+        if (tenant.status === "overdue") {
+          acc[2].value += outstanding; // Overdue
+        } else {
+          acc[1].value += outstanding; // Pending
+        }
+      }
+
+      return acc;
+    }, [
+      { name: "Collected", value: 0, color: "hsl(var(--success))" },
+      { name: "Pending", value: 0, color: "hsl(var(--warning))" },
+      { name: "Overdue", value: 0, color: "hsl(var(--destructive))" },
+    ]);
+  }, [tenants, payments]);
+
   // Calculate revenue by custom month periods based on collectionMonthStart
   const calculateRevenueByMonth = useCallback(() => {
     const monthStart = profile?.collectionMonthStart || 1;
     const revenueMap = new Map<string, { collected: number; pending: number }>();
 
-    // Generate last 6 custom months (showing current and past 5)
+    // Generate last 6 months (showing current and past 5) - always show bars even with zero data
+    const now = new Date();
     for (let i = 5; i >= 0; i--) {
-      const date = new Date();
-      date.setMonth(date.getMonth() - i);
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const monthKey = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
       revenueMap.set(monthKey, { collected: 0, pending: 0 });
     }
@@ -710,8 +776,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       }
     });
 
-    // For pending, calculate expected revenue minus collected for each period
-    // This is a simplified approach: pending = total tenant rent - collected for current/future periods
+    // For pending amounts, show expected revenue for current/future months
     const currentDate = new Date();
     const totalMonthlyRent = tenants.reduce((sum, t) => sum + t.rent, 0);
 
@@ -721,7 +786,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       const isCurrentOrFuture = monthDate >= new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
 
       if (isCurrentOrFuture) {
-        // For current and future periods, pending = expected - collected
+        // For current and future periods, pending = total expected - collected
         data.pending = Math.max(0, totalMonthlyRent - data.collected);
       } else {
         // For past periods, pending = 0 (historical)
@@ -746,15 +811,11 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     return {
       mode, profile, isAuthenticated, isLoading, properties, tenants,
       maintenance,
-      messages: isDemo ? seedMessages : [],
-      revenueByMonth: isDemo ? seedRevenue : calculateRevenueByMonth(),
-      collectionDonut: isDemo
-        ? seedDonut
-        : [
-            { name: "Collected", value: tenants.filter(t => t.status === "paid").reduce((s, t) => s + t.rent, 0), color: "hsl(var(--success))" },
-            { name: "Pending", value: tenants.filter(t => t.status === "pending").reduce((s, t) => s + t.rent, 0), color: "hsl(var(--warning))" },
-            { name: "Overdue", value: tenants.filter(t => t.status === "overdue").reduce((s, t) => s + t.rent, 0), color: "hsl(var(--destructive))" },
-          ],
+  messages: isDemo ? seedMessages : [],
+  revenueByMonth: isDemo ? seedRevenue : calculateRevenueByMonth(),
+  collectionDonut: isDemo
+    ? seedDonut
+    : calculateCollectionDonut(),
       payments, complaints, notifications, waMessages,
       leaseFilterDays, setLeaseFilterDays, expiringTenants,
       addTenant, addTenantsBulk, addProperty, saveProfile,
@@ -766,7 +827,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       tourActive, startTour: () => setTourActive(true), stopTour: () => setTourActive(false),
       register, login, logout, loadProfile,
     };
-  }, [mode, profile, isAuthenticated, isLoading, properties, tenants, payments, complaints, notifications, waMessages, leaseFilterDays, needsOnboarding, tourActive, expiringTenants, botProcess, calculateRevenueByMonth]);
+  }, [mode, profile, isAuthenticated, isLoading, properties, tenants, payments, complaints, notifications, waMessages, leaseFilterDays, needsOnboarding, tourActive, expiringTenants, botProcess, calculateRevenueByMonth, calculateCollectionDonut]);
 
   return <DataCtx.Provider value={value}>{children}</DataCtx.Provider>;
 };
