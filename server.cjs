@@ -22,7 +22,7 @@ app.use(cors({
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use((req, res, next) => {
-    console.log(`[REQUEST] ${req.method} ${req.path}`);
+    console.log(`[REQUEST] ${req.method} ${req.path} - Origin: ${req.headers.origin} - User-Agent: ${req.headers['user-agent']?.substring(0, 50)}...`);
     next();
 });
 
@@ -71,6 +71,9 @@ const sendSMS = async (to, message) => {
 
   try {
     console.log(`📤 Sending real SMS via Talksasa API...`);
+    console.log(`📱 User-Agent: ${process.env.USER_AGENT || 'Unknown'}`);
+    console.log(`🌐 Request Origin: ${process.env.REQUEST_ORIGIN || 'Unknown'}`);
+
     const response = await fetch('https://bulksms.talksasa.com/api/v3/sms/send', {
       method: 'POST',
       headers: {
@@ -88,11 +91,16 @@ const sendSMS = async (to, message) => {
 
     console.log(`📥 SMS API Response Status: ${response.status}`);
     const result = await response.json();
-    console.log(`📥 SMS API Response:`, result);
+    console.log(`📥 SMS API Response:`, JSON.stringify(result, null, 2));
 
     return { success: result.status === 'success', ...result };
   } catch (error) {
     console.error('❌ SMS send error:', error);
+    console.error('❌ Error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
     return { success: false, error: error.message };
   }
 };

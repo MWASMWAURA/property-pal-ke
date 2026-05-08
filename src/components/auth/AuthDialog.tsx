@@ -89,12 +89,20 @@ export const AuthDialog = ({
 
     setIsSubmitting(true);
     try {
+      console.log("📱 Attempting to send OTP from:", navigator.userAgent);
+      console.log("📡 Sending to phone:", form.phone);
+
       const response = await fetch("/api/auth/send-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: form.phone, purpose: "registration" }),
       });
+
+      console.log("📥 Response status:", response.status);
+      console.log("📥 Response headers:", Object.fromEntries(response.headers.entries()));
+
       const result = await response.json();
+      console.log("📦 Response data:", result);
 
       if (result.success) {
         setOtpSent(true);
