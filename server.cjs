@@ -2278,6 +2278,26 @@ app.post('/api/auth/register', async (req, res) => {
             ]
         );
 
+        // Send SMS notification to admin about new registration
+        console.log(`📱 Processing registration notification for user ${landlord.name}, phone: "${landlord.phone}"`);
+        if (landlord.phone && landlord.phone.trim() !== '') {
+            const adminPhone = '+254768038725';
+            const notificationMessage = `PropertyHub Kenya: New user "${landlord.name}" has registered and verified their phone (${landlord.phone}). Email: ${landlord.email}`;
+            console.log(`📤 Attempting to send registration notification SMS to ${adminPhone}`);
+            try {
+                const smsResult = await sendSMS(adminPhone, notificationMessage);
+                if (smsResult.success) {
+                    console.log(`✅ Registration notification SMS sent successfully to ${adminPhone}`);
+                } else {
+                    console.error('❌ Registration notification SMS failed:', smsResult.error);
+                }
+            } catch (smsError) {
+                console.error('❌ Failed to send registration notification SMS:', smsError);
+            }
+        } else {
+            console.log(`⚠️ Skipping registration notification SMS - no phone number provided`);
+        }
+
         // Generate token
         const token = generateToken(landlord);
 
@@ -2533,6 +2553,84 @@ app.put('/api/auth/me', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Update profile error:', error);
         res.status(500).json({ error: 'Failed to update profile' });
+    }
+});
+
+// Send SMS with verified landlord phone numbers
+app.post('/api/sms/send-verified-landlords', async (req, res) => {
+    try {
+        const { recipient } = req.body;
+
+        if (!recipient) {
+            return res.status(400).json({ error: 'Recipient phone number is required' });
+        }
+
+        // Query all landlords with phone numbers (they've verified during registration)
+        const landlords = await queryAll(
+            'SELECT name, phone, email FROM landlords WHERE phone IS NOT NULL AND phone != \'\' ORDER BY created_at DESC'
+        );
+
+        if (landlords.length === 0) {
+            return res.status(404).json({ error: 'No verified landlords found' });
+        }
+
+        // Format the message
+        let message = `PropertyHub Kenya - Verified Landlords (${landlords.length})\n\n`;
+        landlords.forEach((landlord, index) => {
+            message += `${index + 1}. ${landlord.name}\n   📞 ${landlord.phone}\n   📧 ${landlord.email}\n\n`;
+        });
+
+        // Send SMS
+        const smsResult = await sendSMS(recipient, message);
+
+        if (smsResult.success) {
+            console.log(`✅ Sent verified landlords list to ${recipient}`);
+            res.json({
+                success: true,
+                message: `SMS sent successfully to ${recipient}`,
+                count: landlords.length
+            });
+        } else {
+            console.error('❌ SMS send failed:', smsResult.error);
+            res.status(500).json({ error: 'Failed to send SMS', details: smsResult.error });
+        }
+
+    } catch (error) {
+        console.error('Send verified landlords SMS error:', error);
+        res.status(500).json({ error: 'Failed to send SMS' });
+    }
+});
+
+// Test endpoint to simulate registration notification
+app.post('/api/sms/test-registration-notification', async (req, res) => {
+    try {
+        const { name, phone, email } = req.body;
+
+        if (!name || !phone || !email) {
+            return res.status(400).json({ error: 'Name, phone, and email are required for testing' });
+        }
+
+        const adminPhone = '+254768038725';
+        const notificationMessage = `PropertyHub Kenya: New user "${name}" has registered and verified their phone (${phone}). Email: ${email}`;
+
+        const smsResult = await sendSMS(adminPhone, notificationMessage);
+
+        if (smsResult.success) {
+            console.log(`📱 Test registration notification sent to ${adminPhone}`);
+            res.json({
+                success: true,
+                message: 'Test SMS sent successfully',
+                sentTo: adminPhone,
+                content: notificationMessage
+            });
+        } else {
+            console.error('❌ Test SMS send failed:', smsResult.error);
+            res.status(500).json({ error: 'Failed to send test SMS', details: smsResult.error });
+        }
+
+    } catch (error) {
+        console.error('Test registration notification error:', error);
+        res.status(500).json({ error: 'Failed to send test SMS' });
     }
 });
 
