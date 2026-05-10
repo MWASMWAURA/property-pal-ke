@@ -286,52 +286,27 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
           tenants: serverTenants.length,
           payments: serverPayments.length
         });
-          // Ensure properties have unitNames
-          const propertiesWithUnitNames = serverProperties.map((p: any) => ({
-            ...p,
-            unitNames: p.unitNames || Array.from({ length: p.units }, (_, i) => `Unit ${i + 1}`)
-          }));
-          setProperties(propertiesWithUnitNames);
-          setTenants(serverTenants);
-          setPayments(serverPayments);
-          // Save to localStorage as backup
-          localStorage.setItem(KEY, JSON.stringify({
-            properties: propertiesWithUnitNames,
-            tenants: serverTenants,
-            payments: serverPayments,
-            maintenance: [],
-            complaints: [],
-            notifications: [],
-            waMessages: []
-          }));
-      } catch (error) {
-        console.error('Failed to load data from database, using local data:', error);
-        // Fall back to localStorage
-        const raw = localStorage.getItem(KEY);
-        if (raw) {
-          const s = JSON.parse(raw);
-          // Ensure properties have unitNames
-          const propertiesWithUnitNames = (s.properties ?? []).map((p: any) => ({
-            ...p,
-            unitNames: p.unitNames || Array.from({ length: p.units }, (_, i) => `Unit ${i + 1}`)
-          }));
-          setProperties(propertiesWithUnitNames);
-          setTenants(s.tenants ?? []);
-          setPayments(s.payments ?? []);
-          setMaintenance(s.maintenance ?? []);
-          setComplaints(s.complaints ?? []);
-          setNotifications(s.notifications ?? []);
-          setWaMessages(s.waMessages ?? []);
-        } else {
-          console.log('ℹ️ No local data found, starting with empty state');
-          setProperties([]);
-          setTenants([]);
-          setPayments([]);
-          setMaintenance([]);
-          setComplaints([]);
-          setNotifications([]);
-          setWaMessages([]);
-        }
+
+        // Ensure properties have unitNames
+        const propertiesWithUnitNames = serverProperties.map((p: any) => ({
+          ...p,
+          unitNames: p.unitNames || Array.from({ length: p.units }, (_, i) => `Unit ${i + 1}`)
+        }));
+
+        setProperties(propertiesWithUnitNames);
+        setTenants(serverTenants);
+        setPayments(serverPayments);
+
+        // Save to localStorage as backup
+        localStorage.setItem(KEY, JSON.stringify({
+          properties: propertiesWithUnitNames,
+          tenants: serverTenants,
+          payments: serverPayments,
+          maintenance: [],
+          complaints: [],
+          notifications: [],
+          waMessages: []
+        }));
       } catch (error) {
         console.error('Failed to load data from database, using local data:', error);
         // Fall back to localStorage
