@@ -513,24 +513,18 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
           // Update status based on payment progress
           let newStatus: TenantStatus;
           if (totalPaid >= t.rent) {
-            newStatus = "paid"; // Fully paid or overpaid
+            newStatus = "paid";
           } else if (t.status === "overdue") {
             newStatus = "overdue"; // Keep overdue status
           } else {
             newStatus = "pending";
           }
 
-          // Notify about overpayments
-          if (totalPaid > t.rent) {
-            const overpayment = totalPaid - t.rent;
-            pushNotification({
-              type: "payment",
-              title: "Overpayment detected",
-              body: `${t.name} overpaid by ${formatKsh(overpayment)} - will be credited to next period`,
-            });
-          }
+          // Sync updated tenant to server
+          const updatedTenant = { ...t, status: newStatus };
+          api.syncTenant(updatedTenant).catch(e => console.warn('Tenant status sync failed', e));
 
-          return { ...t, status: newStatus };
+          return updatedTenant;
         }
         return t;
       }));

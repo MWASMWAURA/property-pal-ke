@@ -1,15 +1,5 @@
-# Lovable-Tagger Removal Progress
+# TODO
 
-**Status**: Approved. Removing lovable-tagger plugin.
+- [ ] Update `public/manifest.json` to use PNG launcher icons (192x192 and 512x512) instead of SVG/ICO for Android.
+- [ ] (After change) Uninstall/reinstall the app (or clear site data) on the Android phone so the new manifest is picked up.
 
-**Completed**:
-- [x] Step 1: Understand files (vite.config.ts, package.json)
-- [x] Step 2: Edit vite.config.ts (remove import + plugin call)
-- [x] Step 3: Edit package.json (remove devDep)
-
-**Pending**:
-- [x] Step 4: Clean install deps (npm install running)
-- [ ] Step 5: Test npm run dev
-- [ ] Step 6: Complete
-
-Proceeding with Step 2-3 (edits).

@@ -358,7 +358,7 @@ const initDatabase = async () => {
 
                 CREATE TABLE IF NOT EXISTS password_reset_tokens (
                     id TEXT PRIMARY KEY,
-                    email TEXT NOT NULL,
+                    email TEXT UNIQUE NOT NULL,
                     token TEXT UNIQUE NOT NULL,
                     expires_at TEXT NOT NULL,
                     used INTEGER DEFAULT 0,
@@ -501,13 +501,29 @@ const initDatabase = async () => {
             await db.query(`
                 CREATE TABLE IF NOT EXISTS password_reset_tokens (
                     id TEXT PRIMARY KEY,
-                    email TEXT NOT NULL,
+                    email TEXT UNIQUE NOT NULL,
                     token TEXT UNIQUE NOT NULL,
                     expires_at TIMESTAMP NOT NULL,
                     used BOOLEAN DEFAULT false,
                     created_at TIMESTAMP DEFAULT NOW()
                 );
             `);
+            // Remove duplicates by email, keeping the most recent
+            await db.query(`
+                DELETE FROM password_reset_tokens
+                WHERE id NOT IN (
+                    SELECT id FROM (
+                        SELECT id, ROW_NUMBER() OVER (PARTITION BY email ORDER BY created_at DESC) as rn
+                        FROM password_reset_tokens
+                    ) t WHERE rn = 1
+                );
+            `);
+            try {
+                await db.query(`ALTER TABLE password_reset_tokens ADD CONSTRAINT password_reset_tokens_email_unique UNIQUE (email);`);
+                console.log('✅ Added unique constraint on email');
+            } catch (e) {
+                console.log('ℹ️  Unique constraint on email already exists or failed to add');
+            }
             console.log('✅ Password reset tokens table created/verified');
 
             console.log('✅ PostgreSQL database tables created/verified with landlord support');
@@ -2370,7 +2386,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
             const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password?token=${resetToken}`;
 
             const { data, error } = await resend.emails.send({
-                from: 'PropertyHub Kenya <noreply@propertyhubke.com>',
+                from: 'PropertyHub Kenya <noreply@mwasmwaura.co.ke>',
                 to: [email],
                 subject: 'Reset Your Password - PropertyHub Kenya',
                 html: `
@@ -2566,11 +2582,45 @@ app.post('/api/sync/payments', authenticateToken, async (req, res) => {
 
         console.log(`[SYNC] Payment synced for landlord ${landlordId}: ${p.tenantName} ${p.amount}`);
 
+        // Update tenant status based on total payments
+        if (tenantResult) {
+            // Calculate total paid for this tenant
+            const tenantPayments = await queryAll(
+                'SELECT amount FROM payments WHERE tenant_id = $1 AND landlord_id = $2 AND status = $3',
+                [p.tenantId, landlordId, 'paid']
+            );
+            const totalPaid = tenantPayments.reduce((sum, pay) => sum + Number(pay.amount), 0);
+
+            // Update tenant status based on payment progress
+            let newStatus;
+            if (totalPaid >= Number(tenantResult.rent)) {
+                newStatus = 'paid';
+            } else if (tenantResult.status === 'overdue') {
+                newStatus = 'overdue';
+            } else {
+                newStatus = 'pending';
+            }
+
+            // Update tenant status in database
+            await query(
+                'UPDATE tenants SET status = $1 WHERE id = $2 AND landlord_id = $3',
+                [newStatus, p.tenantId, landlordId]
+            );
+
+            console.log(`[SYNC] Tenant ${p.tenantName} status updated to ${newStatus} (paid: ${totalPaid}, rent: ${tenantResult.rent})`);
+        }
+
         // Send real WhatsApp receipt to tenant
-        const tenantResult = await queryOne('SELECT * FROM tenants WHERE id = $1 AND landlord_id = $2', [p.tenantId, landlordId]);
         const tenant = tenantResult ? normalizeTenantRow(tenantResult) : null;
         if (tenant && tenant.phone) {
-            const receiptMsg = `✅ *Payment Confirmed!*\n\nAmount: ${kenyaUtils.formatKES(Number(p.amount))}\nPeriod: ${p.period}\nDate: ${kenyaUtils.formatDate(p.paidAt || new Date().toISOString())}\n\nThank you for your payment!`;
+            const totalPaid = await queryAll(
+                'SELECT amount FROM payments WHERE tenant_id = $1 AND landlord_id = $2 AND status = $3',
+                [p.tenantId, landlordId, 'paid']
+            ).then(rows => rows.reduce((sum, pay) => sum + Number(pay.amount), 0));
+
+            const overpayment = Math.max(0, totalPaid - Number(tenant.rent));
+            const receiptMsg = `✅ *Payment Confirmed!*\n\nAmount: ${kenyaUtils.formatKES(Number(p.amount))}\nPeriod: ${p.period}\nDate: ${kenyaUtils.formatDate(p.paidAt || new Date().toISOString())}${overpayment > 0 ? `\n💰 Overpayment: ${kenyaUtils.formatKES(overpayment)} (credited to next period)` : ''}\n\nThank you for your payment!`;
+
             whatsappProcessor.sendWhatsAppMessage(tenant.phone, receiptMsg).then(result => {
                 console.log(`[SYNC] Receipt sent to ${tenant.name}: ${result.success ? 'ok' : result.error}`);
             }).catch(err => console.error('WhatsApp receipt error:', err));
