@@ -20,14 +20,16 @@ import ResetPassword from "./pages/ResetPassword.tsx";
 import { DataProvider, useData } from "./lib/data-store";
 import { OnboardingDialog } from "./components/onboarding/OnboardingDialog";
 import { TourGuide } from "./components/onboarding/TourGuide";
-import { PWAInstallPrompt } from "./hooks/use-pwa";
+import { PWAInstallPrompt, useStandaloneMode } from "./hooks/use-pwa";
 import { Button } from "./components/ui/button";
 import { LogOut, User } from "lucide-react";
+import StandaloneAuth from "./pages/StandaloneAuth";
 
 const queryClient = new QueryClient();
 
 const AppRoutes = () => {
   const { isAuthenticated, isLoading, logout, profile } = useData();
+  const isStandalone = useStandaloneMode();
 
   // Show loading while checking authentication
   if (isLoading) {
@@ -40,7 +42,12 @@ const AppRoutes = () => {
   }
 
   if (!isAuthenticated) {
-    // Public routes when not authenticated
+    // If running in standalone mode (installed PWA), show app-like auth screen
+    if (isStandalone) {
+      return <StandaloneAuth />;
+    }
+
+    // Public routes when not authenticated (browser mode)
     return (
       <Routes>
         <Route path="/" element={<Landing />} />

@@ -3,14 +3,20 @@ import { Button } from "@/components/ui/button";
 import { Download, X } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
 export const usePWAInstall = () => {
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstallable, setIsInstallable] = useState(false);
 
   useEffect(() => {
-    const handler = (e: any) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
+    const handler = (e: Event) => {
+      const promptEvent = e as BeforeInstallPromptEvent;
+      promptEvent.preventDefault();
+      setDeferredPrompt(promptEvent);
       setIsInstallable(true);
     };
 
@@ -42,6 +48,33 @@ export const usePWAInstall = () => {
   };
 
   return { isInstallable, install };
+};
+
+export const useStandaloneMode = () => {
+  const [isStandalone, setIsStandalone] = useState(false);
+
+  useEffect(() => {
+    const checkStandalone = () => {
+      const isStandaloneMode =
+        window.matchMedia &&
+        window.matchMedia("(display-mode: standalone)").matches;
+
+      // Also check for iOS Safari standalone mode
+      const isIOSStandalone = (window.navigator as { standalone?: boolean }).standalone === true;
+
+      setIsStandalone(isStandaloneMode || isIOSStandalone);
+    };
+
+    checkStandalone();
+
+    // Listen for display mode changes
+    const mediaQuery = window.matchMedia("(display-mode: standalone)");
+    mediaQuery.addEventListener("change", checkStandalone);
+
+    return () => mediaQuery.removeEventListener("change", checkStandalone);
+  }, []);
+
+  return isStandalone;
 };
 
 export const PWAInstallPrompt = () => {
