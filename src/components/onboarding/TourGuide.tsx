@@ -12,14 +12,19 @@ type Step = {
 };
 
 const STEPS: Step[] = [
-  { selector: "[data-tour='hero-kpis']",   title: "Hero KPIs",        body: "Overdue rent and vacancies are surfaced first — your daily money signal.", route: "/" },
-  { selector: "[data-tour='revenue']",     title: "Revenue trend",    body: "Last 6 months of collected vs pending rent across your portfolio." },
-  { selector: "[data-tour='collection']",  title: "Collection rate",  body: "Healthy target is 95%+. The donut shows paid, pending and overdue at a glance." },
-  { selector: "[data-tour='whatsapp']",    title: "WhatsApp hub",     body: "Send bulk reminders to all overdue tenants in one tap." },
-  { selector: "[data-tour='nav-properties']", title: "Properties",   body: "Manage every building and its occupancy here.", route: "/properties" },
-  { selector: "[data-tour='add-property']", title: "Add a property", body: "Use this button to add your own buildings when you're ready." },
-  { selector: "[data-tour='nav-tenants']", title: "Tenants",          body: "Search, message and review every tenant.", route: "/tenants" },
-  { selector: "[data-tour='add-tenant']",  title: "Add a tenant",     body: "Capture name, unit and rent — it appears instantly in your tracker." },
+  { selector: "[data-tour='hero-kpis']",     title: "Hero KPIs",        body: "Overdue rent and vacancies are surfaced first — your daily money signal.", route: "/" },
+  { selector: "[data-tour='revenue']",       title: "Revenue trend",    body: "Last 6 months of collected vs pending rent across your portfolio." },
+  { selector: "[data-tour='collection']",    title: "Collection rate",  body: "Healthy target is 95%+. The donut shows paid, pending and overdue at a glance." },
+  { selector: "[data-tour='whatsapp']",      title: "WhatsApp hub",     body: "Send bulk reminders to all overdue tenants in one tap." },
+  { selector: "[data-tour='nav-properties']", title: "Properties",      body: "Manage every building and its occupancy here.", route: "/properties" },
+  { selector: "[data-tour='add-property']",   title: "Add a property",   body: "Use this button to add your own buildings when you're ready." },
+  { selector: "[data-tour='nav-tenants']",    title: "Tenants",         body: "Search, message and review every tenant.", route: "/tenants" },
+  { selector: "[data-tour='add-tenant']",     title: "Add a tenant",     body: "Capture name, unit and rent — it appears instantly in your tracker." },
+  { selector: "[data-tour='nav-collections']", title: "Collections",     body: "Track rent receipts, overdue balances, and collection performance.", route: "/collections" },
+  { selector: "[data-tour='nav-maintenance']", title: "Maintenance",     body: "Log repairs, manage vendors, and stay on top of issue resolution.", route: "/maintenance" },
+  { selector: "[data-tour='nav-messages']",    title: "WhatsApp",        body: "Open the WhatsApp inbox to reply or review tenant messages.", route: "/messages" },
+  { selector: "[data-tour='nav-reports']",     title: "Reports",         body: "View portfolio trends, revenue outlook and performance summaries.", route: "/reports" },
+  { selector: "[data-tour='nav-settings']",    title: "Settings",        body: "Update your profile, payment preferences, and notification settings.", route: "/settings" },
 ];
 
 export const TourGuide = () => {

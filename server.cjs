@@ -55,6 +55,8 @@ let isSQLite = false;
 // JWT and bcrypt for authentication
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const createOtpPolicy = require('./otp-policy.cjs');
+let otpPolicy;
 
 // JWT secret - in production, use environment variable
 const JWT_SECRET = process.env.JWT_SECRET || 'propertyhub_kenya_secret_2026';
@@ -123,19 +125,13 @@ const sendOTP = async (phone, purpose = 'registration') => {
     const otpId = generateId();
     if (isSQLite) {
       db.prepare(`
-        INSERT OR REPLACE INTO otp_codes (id, phone, code, purpose, expires_at)
+        INSERT INTO otp_codes (id, phone, code, purpose, expires_at)
         VALUES (?, ?, ?, ?, ?)
       `).run(otpId, normalizedPhone, code, purpose, expiresAt.toISOString());
     } else {
       await db.query(`
         INSERT INTO otp_codes (id, phone, code, purpose, expires_at)
         VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (phone) DO UPDATE SET
-        code = EXCLUDED.code,
-        purpose = EXCLUDED.purpose,
-        expires_at = EXCLUDED.expires_at,
-        used = false,
-        created_at = NOW()
       `, [otpId, normalizedPhone, code, purpose, expiresAt]);
     }
 
@@ -144,6 +140,8 @@ const sendOTP = async (phone, purpose = 'registration') => {
     // Send SMS
     const message = `PropertyHub Kenya: Your verification code is ${code}. Valid for 10 minutes.`;
     const smsResult = await sendSMS(phone, message);
+
+    await otpPolicy.recordOtpRequest({ phone: normalizedPhone, purpose, success: smsResult.success });
 
     return { success: smsResult.success, code: smsResult.simulated ? code : undefined };
   } catch (error) {
@@ -348,12 +346,20 @@ const initDatabase = async () => {
 
                 CREATE TABLE IF NOT EXISTS otp_codes (
                     id TEXT PRIMARY KEY,
-                    phone TEXT UNIQUE NOT NULL,
+                    phone TEXT NOT NULL,
                     code TEXT NOT NULL,
                     purpose TEXT NOT NULL, -- 'registration' or 'verification'
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     expires_at TEXT NOT NULL,
                     used INTEGER DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS otp_request_logs (
+                    id TEXT PRIMARY KEY,
+                    phone TEXT NOT NULL,
+                    purpose TEXT NOT NULL,
+                    success INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS password_reset_tokens (
@@ -489,12 +495,20 @@ const initDatabase = async () => {
             await db.query(`
                 CREATE TABLE IF NOT EXISTS otp_codes (
                     id TEXT PRIMARY KEY,
-                    phone TEXT UNIQUE NOT NULL,
+                    phone TEXT NOT NULL,
                     code TEXT NOT NULL,
                     purpose TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT NOW(),
                     expires_at TIMESTAMP NOT NULL,
                     used BOOLEAN DEFAULT false
+                );
+
+                CREATE TABLE IF NOT EXISTS otp_request_logs (
+                    id TEXT PRIMARY KEY,
+                    phone TEXT NOT NULL,
+                    purpose TEXT NOT NULL,
+                    success BOOLEAN DEFAULT true,
+                    created_at TIMESTAMP DEFAULT NOW()
                 );
             `);
 
@@ -567,6 +581,8 @@ const initializeApp = async () => {
     await initDatabase();
     await loadDatabaseData();
 
+    otpPolicy = createOtpPolicy({ db, isSQLite, query });
+
     // Start server only after database is ready
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
@@ -593,10 +609,11 @@ const loadJson = (value, fallback) => {
 
 const normalizePropertyRow = (row) => ({
   ...row,
-  monthlyRent: row.monthlyRent != null ? Number(row.monthlyRent) : row.monthlyRent,
-  taxRate: row.taxRate != null ? Number(row.taxRate) : row.taxRate,
-  units: loadJson(row.units, []),
-  recurringBills: loadJson(row.recurringBills, [])
+  location: row.address,
+  unitNames: loadJson(row.units, []),
+  monthlyRent: row.monthlyrent != null ? Number(row.monthlyrent) : row.monthlyrent,
+  taxRate: row.taxrate != null ? Number(row.taxrate) : row.taxrate,
+  recurringBills: loadJson(row.recurringbills, [])
 });
 
 // Helper functions for database queries (works with both PostgreSQL and SQLite)
@@ -2185,7 +2202,21 @@ app.post('/api/auth/send-otp', async (req, res) => {
       return res.status(400).json({ error: 'Invalid Kenyan phone number' });
     }
 
-    const result = await sendOTP(phone, purpose || 'registration');
+    const normalizedPhone = kenyaUtils.formatPhone(phone);
+    const otpPurpose = purpose || 'registration';
+
+    if (otpPurpose === 'registration') {
+      const canSend = await otpPolicy.canSendRegistrationOtp(normalizedPhone);
+      if (!canSend) {
+        console.log(`⚠️ OTP rate limit reached for ${normalizedPhone}`);
+        return res.status(429).json({
+          error: 'OTP limit reached. Please use the code already sent or try again tomorrow.',
+          retryAfter: '24 hours'
+        });
+      }
+    }
+
+    const result = await sendOTP(phone, otpPurpose);
 
     if (result.success) {
       console.log(`✅ OTP sent successfully to ${phone}`);
@@ -2384,8 +2415,11 @@ app.post('/api/auth/forgot-password', async (req, res) => {
         // Check if landlord exists
         const landlord = await queryOne('SELECT id, name, email FROM landlords WHERE email = $1', [email]);
         if (!landlord) {
-            // Don't reveal if email exists or not for security
-            return res.json({ success: true, message: 'If the email exists, a reset link has been sent.' });
+            // Tell user to register first instead of hiding the fact
+            return res.status(404).json({
+                error: 'Account not found. Please create an account first to get started with PropertyHub Kenya.',
+                shouldRegister: true
+            });
         }
 
         // Generate reset token
@@ -2436,7 +2470,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
             console.log(`[SIMULATED] Password reset email sent to ${email} with token: ${resetToken}`);
         }
 
-        res.json({ success: true, message: 'If the email exists, a reset link has been sent.' });
+        res.json({ success: true, message: 'Password reset link has been sent to your email.' });
 
     } catch (error) {
         console.error('Forgot password error:', error);
@@ -2733,6 +2767,54 @@ app.post('/api/sync/payments', authenticateToken, async (req, res) => {
         res.json({ ok: true });
     } catch (error) {
         console.error('Payment sync error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Upsert property from React app
+app.post('/api/sync/properties', authenticateToken, async (req, res) => {
+    try {
+        const p = req.body;
+        const landlordId = req.landlord.id;
+
+        if (!p.id || !p.name) {
+            return res.status(400).json({ error: 'id and name required' });
+        }
+
+        // Insert or update property with landlord_id
+        await query(
+            `INSERT INTO properties (id, landlord_id, name, address, type, status, monthlyrent, taxrate, units, recurringbills, createdat, updatedat)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+             ON CONFLICT (id) DO UPDATE SET
+             name = EXCLUDED.name,
+             address = EXCLUDED.address,
+             type = EXCLUDED.type,
+             status = EXCLUDED.status,
+             monthlyrent = EXCLUDED.monthlyrent,
+             taxrate = EXCLUDED.taxrate,
+             units = EXCLUDED.units,
+             recurringbills = EXCLUDED.recurringbills,
+             updatedat = EXCLUDED.updatedat
+             WHERE landlord_id = $2`,
+            [
+                p.id,
+                landlordId,
+                p.name,
+                p.location || p.address || '',
+                p.type || 'residential',
+                p.status || 'active',
+                Number(p.monthlyRent) || 0,
+                Number(p.taxRate) || 0,
+                JSON.stringify(p.unitNames || []),
+                JSON.stringify(p.recurringBills || []),
+                p.createdAt || new Date().toISOString(),
+                new Date().toISOString()
+            ]
+        );
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Property sync error:', error);
         res.status(500).json({ error: error.message });
     }
 });

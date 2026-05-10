@@ -141,6 +141,16 @@ type Ctx = {
 const DataCtx = createContext<Ctx | null>(null);
 const KEY = "propertyhub:state:v2";
 const USER_DATA_KEY = "propertyhub:user-data:v1";
+const SYNC_QUEUE_KEY = "propertyhub:sync-queue:v1";
+
+type SyncOperation = {
+  id: string;
+  type: 'property' | 'tenant' | 'payment' | 'complaint';
+  action: 'create' | 'update';
+  data: any;
+  timestamp: number;
+  retries: number;
+};
 
 const emptyRevenue = [
   { month: "Nov", collected: 0, pending: 0 },
@@ -166,6 +176,57 @@ const parseDMY = (s: string): Date | null => {
   return new Date(+m[3], +m[2] - 1, +m[1]);
 };
 
+// Sync queue management
+const addToSyncQueue = (operation: Omit<SyncOperation, 'id' | 'timestamp' | 'retries'>) => {
+  const syncOp: SyncOperation = {
+    ...operation,
+    id: uid('sync'),
+    timestamp: Date.now(),
+    retries: 0
+  };
+  setSyncQueue(prev => [...prev, syncOp]);
+  const existing = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]');
+  localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify([...existing, syncOp]));
+};
+
+const removeFromSyncQueue = (id: string) => {
+  setSyncQueue(prev => prev.filter(op => op.id !== id));
+  const existing = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]');
+  localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(existing.filter((op: SyncOperation) => op.id !== id)));
+};
+
+const processSyncQueue = async () => {
+  if (!isOnline || !isAuthenticated) return;
+
+  const queue = [...syncQueue];
+  for (const operation of queue) {
+    try {
+      switch (operation.type) {
+        case 'property':
+          await api.syncProperty(operation.data);
+          break;
+        case 'tenant':
+          await api.syncTenant(operation.data);
+          break;
+        case 'payment':
+          await api.syncPayment(operation.data);
+          break;
+      }
+      removeFromSyncQueue(operation.id);
+    } catch (error) {
+      console.warn(`Sync failed for ${operation.type}, will retry:`, error);
+      // Increment retry count, remove after 5 failed attempts
+      if (operation.retries >= 5) {
+        removeFromSyncQueue(operation.id);
+      } else {
+        setSyncQueue(prev => prev.map(op =>
+          op.id === operation.id ? { ...op, retries: op.retries + 1 } : op
+        ));
+      }
+    }
+  }
+};
+
 export const DataProvider = ({ children }: { children: ReactNode }) => {
   const [mode, setMode] = useState<Mode>("unset");
   const [profile, setProfile] = useState<LandlordProfile | null>(null);
@@ -181,6 +242,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [tourActive, setTourActive] = useState(false);
   const [leaseFilterDays, setLeaseFilterDays] = useState(30);
+  const [syncQueue, setSyncQueue] = useState<SyncOperation[]>([]);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   // Authentication methods (inside component so they can access state setters)
   const register = async (data: Parameters<Ctx["register"]>[0]): Promise<ReturnType<Ctx["register"]>> => {
@@ -269,6 +332,38 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     loadProfile();
   }, []);
+
+  // Load sync queue from localStorage
+  useEffect(() => {
+    const savedQueue = localStorage.getItem(SYNC_QUEUE_KEY);
+    if (savedQueue) {
+      setSyncQueue(JSON.parse(savedQueue));
+    }
+  }, []);
+
+  // Online/offline detection
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      processSyncQueue();
+    };
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [isOnline, isAuthenticated]);
+
+  // Process sync queue when online
+  useEffect(() => {
+    if (isOnline && isAuthenticated) {
+      processSyncQueue();
+    }
+  }, [isOnline, isAuthenticated, syncQueue]);
 
   // Hydrate other data (only after authentication)
   useEffect(() => {
@@ -577,7 +672,10 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     }
 
     // Sync to server so WhatsApp bot can look up by phone
-    api.syncTenant(tenant).catch(e => console.warn('Tenant sync failed', e));
+    addToSyncQueue({ type: 'tenant', action: 'create', data: tenant });
+    if (isOnline && isAuthenticated) {
+      api.syncTenant(tenant).catch(e => console.warn('Tenant sync failed, queued for later:', e));
+    }
 
     return tenant;
   };
@@ -594,11 +692,37 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     return mapped.length;
   };
 
-  const addProperty: Ctx["addProperty"] = (p) =>
-    setProperties(prev => [{ ...p, id: uid("p") } as Property, ...prev]);
+  const addProperty: Ctx["addProperty"] = (p) => {
+    const property = { ...p, id: uid("p") } as Property;
+    setProperties(prev => [property, ...prev]);
+    
+    // Add to sync queue for offline support
+    addToSyncQueue({ type: 'property', action: 'create', data: property });
+    
+    // Try to sync immediately if online
+    if (isOnline && isAuthenticated) {
+      api.syncProperty(property).catch(e => console.warn('Property sync failed, queued for later:', e));
+    }
+    
+    return property;
+  };
 
   const updateProperty: Ctx["updateProperty"] = (id, updates) => {
-    setProperties(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+    setProperties(prev => prev.map(p => {
+      if (p.id === id) {
+        const updated = { ...p, ...updates };
+        // Add to sync queue for offline support
+        addToSyncQueue({ type: 'property', action: 'update', data: updated });
+        
+        // Try to sync immediately if online
+        if (isOnline && isAuthenticated) {
+          api.syncProperty(updated).catch(e => console.warn('Property update sync failed, queued for later:', e));
+        }
+        
+        return updated;
+      }
+      return p;
+    }));
   };
 
   const updateTenant: Ctx["updateTenant"] = (id, updates) => {
@@ -678,7 +802,10 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
           // Sync updated tenant to server
           const updatedTenant = { ...t, status: newStatus };
-          api.syncTenant(updatedTenant).catch(e => console.warn('Tenant status sync failed', e));
+          addToSyncQueue({ type: 'tenant', action: 'update', data: updatedTenant });
+          if (isOnline && isAuthenticated) {
+            api.syncTenant(updatedTenant).catch(e => console.warn('Tenant status sync failed, queued for later:', e));
+          }
 
           return updatedTenant;
         }
@@ -694,10 +821,9 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     });
 
     // Sync to server — server sends the real WhatsApp receipt
-    try {
-      await api.syncPayment({ ...payment });
-    } catch (e) {
-      console.warn('Server sync failed, continuing locally', e);
+    addToSyncQueue({ type: 'payment', action: 'create', data: payment });
+    if (isOnline && isAuthenticated) {
+      api.syncPayment({ ...payment }).catch(e => console.warn('Payment sync failed, queued for later:', e));
     }
 
     // Keep local WA thread updated for the Messages page

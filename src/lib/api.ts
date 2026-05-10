@@ -28,6 +28,9 @@ const put = (path: string, body?: object) =>
   }).then(r => r.json());
 
 export const api = {
+  // Sync property to server
+  syncProperty: (property: object) => post('/api/sync/properties', property),
+
   // Sync tenant to server whenever added
   syncTenant: (tenant: object) => post('/api/sync/tenants', tenant),
 

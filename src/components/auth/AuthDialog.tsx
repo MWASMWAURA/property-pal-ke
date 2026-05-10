@@ -248,9 +248,17 @@ export const AuthDialog = ({
       if (result.success) {
         toast({
           title: "Reset Link Sent!",
-          description: "Check your email for password reset instructions.",
+          description: result.message || "Check your email for password reset instructions.",
         });
         switchMode("login");
+      } else if (result.shouldRegister) {
+        toast({
+          title: "Account Not Found",
+          description: "Please create an account first to get started with PropertyHub Kenya.",
+          variant: "destructive",
+        });
+        // Optionally switch to register mode
+        switchMode("register");
       } else {
         toast({
           title: "Failed to send reset link",
