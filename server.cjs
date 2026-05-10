@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'https://property-pal-ke.onrender.com' || 'http://localhost:5173',
+  origin: process.env.FRONTEND_URL || ['https://property-pal-ke.onrender.com', 'http://localhost:5173', 'http://localhost:5174'],
   credentials: true
 }));
 app.use(bodyParser.json());
@@ -2100,9 +2100,10 @@ app.get('/api/notifications', (req, res) => {
     res.json(notifications);
 });
 
-app.get('/api/sync/properties', async (req, res) => {
+app.get('/api/sync/properties', authenticateToken, async (req, res) => {
     try {
-        const rows = await queryAll('SELECT * FROM properties');
+        const landlordId = req.landlord.id;
+        const rows = await queryAll('SELECT * FROM properties WHERE landlord_id = $1', [landlordId]);
         res.json(rows.map(normalizePropertyRow));
     } catch (error) {
         console.error('Error fetching properties:', error);
@@ -2110,9 +2111,10 @@ app.get('/api/sync/properties', async (req, res) => {
     }
 });
 
-app.get('/api/sync/tenants', async (req, res) => {
+app.get('/api/sync/tenants', authenticateToken, async (req, res) => {
     try {
-        const rows = await queryAll('SELECT * FROM tenants');
+        const landlordId = req.landlord.id;
+        const rows = await queryAll('SELECT * FROM tenants WHERE landlord_id = $1', [landlordId]);
         res.json(rows.map(normalizeTenantRow));
     } catch (error) {
         console.error('Error fetching tenants:', error);
@@ -2120,9 +2122,10 @@ app.get('/api/sync/tenants', async (req, res) => {
     }
 });
 
-app.get('/api/sync/payments', async (req, res) => {
+app.get('/api/sync/payments', authenticateToken, async (req, res) => {
     try {
-        const rows = await queryAll('SELECT * FROM payments');
+        const landlordId = req.landlord.id;
+        const rows = await queryAll('SELECT * FROM payments WHERE landlord_id = $1', [landlordId]);
         res.json(rows.map(normalizePaymentRow));
     } catch (error) {
         console.error('Error fetching payments:', error);
@@ -2679,6 +2682,9 @@ app.post('/api/sync/payments', authenticateToken, async (req, res) => {
         );
 
         console.log(`[SYNC] Payment synced for landlord ${landlordId}: ${p.tenantName} ${p.amount}`);
+
+        // Get tenant information for status update
+        const tenantResult = await queryOne('SELECT * FROM tenants WHERE id = $1 AND landlord_id = $2', [p.tenantId, landlordId]);
 
         // Update tenant status based on total payments
         if (tenantResult) {

@@ -6,39 +6,44 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { useData, TenantStatus } from "@/lib/data-store";
 import { toast } from "@/hooks/use-toast";
-import { Users } from "lucide-react";
+import { Edit } from "lucide-react";
 
-export const AddTenantDialog = ({ trigger, defaultProperty, defaultUnit }: { trigger: React.ReactNode; defaultProperty?: string; defaultUnit?: string }) => {
-  const { addTenant, properties } = useData();
+export const EditTenantDialog = ({ trigger, tenantId }: { trigger: React.ReactNode; tenantId: string }) => {
+  const { tenants, properties, updateTenant } = useData();
   const [open, setOpen] = useState(false);
+  const tenant = tenants.find(t => t.id === tenantId);
+
   const [form, setForm] = useState({
-    name: "", phone: "", unit: defaultUnit || "", property: defaultProperty || "",
+    name: "", phone: "", unit: "", property: "",
     rent: 30000, status: "pending" as TenantStatus,
     method: "M-Pesa", dueDate: "05/05/2026", leaseEnd: "31/12/2026",
   });
 
   useEffect(() => {
-    setForm(prev => ({ ...prev, property: defaultProperty || "", unit: defaultUnit || prev.unit }));
-  }, [defaultProperty, defaultUnit]);
+    if (tenant && open) {
+      setForm({
+        name: tenant.name,
+        phone: tenant.phone,
+        unit: tenant.unit,
+        property: tenant.property,
+        rent: tenant.rent,
+        status: tenant.status,
+        method: tenant.method,
+        dueDate: tenant.dueDate,
+        leaseEnd: tenant.leaseEnd,
+      });
+    }
+  }, [tenant, open]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name || !form.unit || !form.property) {
-      if (!form.property) {
-        toast({
-          title: "Property required",
-          description: "Please add a property first before adding tenants.",
-          variant: "destructive"
-        });
-        return;
-      }
-      return;
-    }
-    addTenant(form);
-    toast({ title: "Tenant added", description: `${form.name} added to ${form.property}.` });
+    if (!form.name || !form.unit || !form.property || !tenant) return;
+    updateTenant(tenant.id, form);
+    toast({ title: "Tenant updated", description: `${form.name}'s information has been updated.` });
     setOpen(false);
-    setForm({ ...form, name: "", phone: "", unit: "" });
   };
+
+  if (!tenant) return null;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -46,10 +51,10 @@ export const AddTenantDialog = ({ trigger, defaultProperty, defaultUnit }: { tri
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <div className="size-10 rounded-xl gradient-primary text-primary-foreground flex items-center justify-center mb-2">
-            <Users className="size-5"/>
+            <Edit className="size-5"/>
           </div>
-          <DialogTitle>Add a tenant</DialogTitle>
-          <DialogDescription>Capture tenant details — they'll appear in your collections tracker.</DialogDescription>
+          <DialogTitle>Edit tenant</DialogTitle>
+          <DialogDescription>Update tenant contact information and details.</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -113,7 +118,7 @@ export const AddTenantDialog = ({ trigger, defaultProperty, defaultUnit }: { tri
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button type="submit" className="gradient-primary text-primary-foreground">Add tenant</Button>
+            <Button type="submit" className="gradient-primary text-primary-foreground">Update tenant</Button>
           </DialogFooter>
         </form>
       </DialogContent>

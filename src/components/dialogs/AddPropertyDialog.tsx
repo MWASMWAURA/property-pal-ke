@@ -10,14 +10,19 @@ import { Building2 } from "lucide-react";
 export const AddPropertyDialog = ({ trigger }: { trigger: React.ReactNode }) => {
   const { addProperty } = useData();
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", location: "", units: 1, occupied: 0 });
+  const [form, setForm] = useState({ name: "", location: "", units: 1, occupied: 0, unitNames: [] as string[] });
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name || !form.location) return;
-    addProperty({ ...form, image: "" });
+
+    // Generate default unit names if units specified but no custom unitNames
+    const unitNames = form.unitNames.length > 0 ? form.unitNames :
+      Array.from({ length: form.units }, (_, i) => `Unit ${i + 1}`);
+
+    addProperty({ ...form, image: "", unitNames });
     toast({ title: "Property added", description: `${form.name} is now in your portfolio.` });
-    setForm({ name: "", location: "", units: 1, occupied: 0 });
+    setForm({ name: "", location: "", units: 1, occupied: 0, unitNames: [] });
     setOpen(false);
   };
 

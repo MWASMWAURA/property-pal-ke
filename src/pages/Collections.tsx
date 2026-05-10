@@ -25,11 +25,11 @@ const Collections = () => {
 
   // Calculate totals based on actual balances
   const totalExpected = tenants.reduce((s, t) => s + t.rent, 0);
-  const collected = payments.reduce((s, p) => s + p.amount, 0);
+  const collected = payments.filter(p => p.status === "paid").reduce((s, p) => s + p.amount, 0);
 
   // Calculate outstanding balances (only positive balances, overpayments don't create negative balances)
   const tenantBalances = tenants.map(tenant => {
-    const tenantPayments = payments.filter(p => p.tenantId === tenant.id);
+    const tenantPayments = payments.filter(p => p.tenantId === tenant.id && p.status === "paid");
     const totalPaid = tenantPayments.reduce((sum, p) => sum + p.amount, 0);
     return {
       ...tenant,
@@ -79,7 +79,7 @@ const Collections = () => {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
         <Card className="p-5 shadow-card border-border/60">
           <div className="text-xs uppercase tracking-wider text-muted-foreground">Expected</div>
-          <div className="text-2xl font-bold font-mono-num">{formatKsh(total)}</div>
+          <div className="text-2xl font-bold font-mono-num">{formatKsh(totalExpected)}</div>
         </Card>
         <Card className="p-5 shadow-card border-border/60 border-success/30">
           <div className="text-xs uppercase tracking-wider text-success">Collected</div>

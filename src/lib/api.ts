@@ -34,6 +34,11 @@ export const api = {
   // Sync payment to server + triggers real WhatsApp receipt
   syncPayment: (payment: object) => post('/api/sync/payments', payment),
 
+  // Fetch data from server
+  fetchProperties: () => get('/api/sync/properties'),
+  fetchTenants: () => get('/api/sync/tenants'),
+  fetchPayments: () => get('/api/sync/payments'),
+
   // Get notifications from server (real complaints from WhatsApp tenants)
   getNotifications: () => get('/api/sync/notifications'),
 

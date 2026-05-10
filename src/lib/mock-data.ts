@@ -2,10 +2,10 @@ export const formatKsh = (n: number) =>
   `KSh ${n.toLocaleString("en-KE", { maximumFractionDigits: 0 })}`;
 
 export const properties = [
-  { id: "p1", name: "Kilimani Heights", location: "Kilimani, Nairobi", units: 24, occupied: 22, image: "" },
-  { id: "p2", name: "Westlands Court", location: "Westlands, Nairobi", units: 18, occupied: 17, image: "" },
-  { id: "p3", name: "Lavington Gardens", location: "Lavington, Nairobi", units: 12, occupied: 9, image: "" },
-  { id: "p4", name: "Karen Villas", location: "Karen, Nairobi", units: 8, occupied: 8, image: "" },
+  { id: "p1", name: "Kilimani Heights", location: "Kilimani, Nairobi", units: 24, occupied: 22, image: "", unitNames: ["A-101","A-102","A-103","A-104","A-201","A-202","A-203","A-204","A-301","A-302","A-303","A-304","B-101","B-102","B-103","B-104","B-201","B-202","B-203","B-204","B-301","B-302","C-101","C-102"] },
+  { id: "p2", name: "Westlands Court", location: "Westlands, Nairobi", units: 18, occupied: 17, image: "", unitNames: ["A-101","A-102","A-103","A-104","A-201","A-202","A-203","A-204","B-101","B-102","B-103","B-104","B-201","B-202","B-203","C-101","C-102","C-103"] },
+  { id: "p3", name: "Lavington Gardens", location: "Lavington, Nairobi", units: 12, occupied: 9, image: "", unitNames: ["A-101","A-102","A-103","B-101","B-102","B-103","C-101","C-102","C-103","C-104","C-105","D-101"] },
+  { id: "p4", name: "Karen Villas", location: "Karen, Nairobi", units: 8, occupied: 8, image: "", unitNames: ["Villa-1","Villa-2","Villa-3","Villa-4","Villa-5","Villa-6","Villa-7","Villa-8"] },
 ];
 
 export type TenantStatus = "paid" | "pending" | "overdue";

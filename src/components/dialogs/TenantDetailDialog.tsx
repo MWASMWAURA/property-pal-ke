@@ -2,20 +2,22 @@ import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useData } from "@/lib/data-store";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { formatKsh } from "@/lib/mock-data";
-import { Phone, MessageCircle, Receipt, MessageSquareWarning, FileText } from "lucide-react";
+import { Phone, MessageCircle, Receipt, MessageSquareWarning, FileText, Edit, Trash2 } from "lucide-react";
 import { RecordPaymentDialog } from "./RecordPaymentDialog";
 import { RecordComplaintDialog } from "./RecordComplaintDialog";
+import { EditTenantDialog } from "./EditTenantDialog";
 
 export const TenantDetailDialog = ({
   trigger, tenantId,
 }: { trigger: React.ReactNode; tenantId: string }) => {
-  const { tenants, payments, complaints, waMessages } = useData();
+  const { tenants, payments, complaints, waMessages, deleteTenant } = useData();
   const [open, setOpen] = useState(false);
   const tenant = tenants.find(t => t.id === tenantId);
   if (!tenant) return null;
 
-  const tPays = payments.filter(p => p.tenantId === tenantId);
+  const tPays = payments.filter(p => p.tenantId === tenantId && p.status === "paid");
   const tComplaints = complaints.filter(c => c.tenantId === tenantId);
   const tMsgs = waMessages.filter(m => m.tenantId === tenantId);
   const totalPaid = tPays.reduce((s, p) => s + p.amount, 0);
@@ -49,6 +51,28 @@ export const TenantDetailDialog = ({
           <RecordComplaintDialog defaultTenantId={tenant.id} trigger={
             <Button size="sm" variant="outline"><MessageSquareWarning className="size-3.5" /> Log complaint</Button>
           } />
+          <EditTenantDialog tenantId={tenant.id} trigger={
+            <Button size="sm" variant="outline"><Edit className="size-3.5" /> Edit tenant</Button>
+          } />
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button size="sm" variant="outline" className="text-destructive hover:text-destructive"><Trash2 className="size-3.5" /> Delete tenant</Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete tenant</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Are you sure you want to delete {tenant.name}? This will remove all their payment history, complaints, and messages. The unit will become vacant.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={() => { deleteTenant(tenant.id); setOpen(false); }} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           <Button size="sm" variant="outline"><MessageCircle className="size-3.5" /> WhatsApp</Button>
           <Button size="sm" variant="outline"><Phone className="size-3.5" /> Call</Button>
         </div>

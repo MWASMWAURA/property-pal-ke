@@ -12,7 +12,7 @@ import {
   TenantStatus,
 } from "./mock-data";
 
-export type Property = (typeof seedProperties)[number];
+export type Property = (typeof seedProperties)[number] & { unitNames: string[] };
 export type Tenant = (typeof seedTenants)[number];
 
 export type Payment = {
@@ -97,7 +97,11 @@ type Ctx = {
 
   addTenant: (t: Omit<Tenant, "id">) => Tenant;
   addTenantsBulk: (rows: Omit<Tenant, "id">[]) => number;
+  updateTenant: (id: string, updates: Partial<Tenant>) => void;
+  deleteTenant: (id: string) => void;
   addProperty: (p: Omit<Property, "id">) => void;
+  updateProperty: (id: string, updates: Partial<Property>) => void;
+  deleteUnit: (propertyId: string, unitName: string) => boolean;
   saveProfile: (p: LandlordProfile) => void;
 
   recordPayment: (p: Omit<Payment, "id" | "paidAt"> & { paidAt?: string }) => void;
@@ -270,21 +274,96 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (!isAuthenticated || isLoading) return;
 
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) {
-        const s = JSON.parse(raw);
-        setProperties(s.properties ?? []);
-        setTenants(s.tenants ?? []);
-        setPayments(s.payments ?? []);
-        setMaintenance(s.maintenance ?? []);
-        setComplaints(s.complaints ?? []);
-        setNotifications(s.notifications ?? []);
-        setWaMessages(s.waMessages ?? []);
+    const loadData = async () => {
+      try {
+        // Try to load from server first
+        const serverProperties = await api.fetchProperties();
+        const serverTenants = await api.fetchTenants();
+        const serverPayments = await api.fetchPayments();
+
+        console.log('✅ Loaded data from database:', {
+          properties: serverProperties.length,
+          tenants: serverTenants.length,
+          payments: serverPayments.length
+        });
+          // Ensure properties have unitNames
+          const propertiesWithUnitNames = serverProperties.map((p: any) => ({
+            ...p,
+            unitNames: p.unitNames || Array.from({ length: p.units }, (_, i) => `Unit ${i + 1}`)
+          }));
+          setProperties(propertiesWithUnitNames);
+          setTenants(serverTenants);
+          setPayments(serverPayments);
+          // Save to localStorage as backup
+          localStorage.setItem(KEY, JSON.stringify({
+            properties: propertiesWithUnitNames,
+            tenants: serverTenants,
+            payments: serverPayments,
+            maintenance: [],
+            complaints: [],
+            notifications: [],
+            waMessages: []
+          }));
+      } catch (error) {
+        console.error('Failed to load data from database, using local data:', error);
+        // Fall back to localStorage
+        const raw = localStorage.getItem(KEY);
+        if (raw) {
+          const s = JSON.parse(raw);
+          // Ensure properties have unitNames
+          const propertiesWithUnitNames = (s.properties ?? []).map((p: any) => ({
+            ...p,
+            unitNames: p.unitNames || Array.from({ length: p.units }, (_, i) => `Unit ${i + 1}`)
+          }));
+          setProperties(propertiesWithUnitNames);
+          setTenants(s.tenants ?? []);
+          setPayments(s.payments ?? []);
+          setMaintenance(s.maintenance ?? []);
+          setComplaints(s.complaints ?? []);
+          setNotifications(s.notifications ?? []);
+          setWaMessages(s.waMessages ?? []);
+        } else {
+          console.log('ℹ️ No local data found, starting with empty state');
+          setProperties([]);
+          setTenants([]);
+          setPayments([]);
+          setMaintenance([]);
+          setComplaints([]);
+          setNotifications([]);
+          setWaMessages([]);
+        }
+      } catch (error) {
+        console.error('Failed to load data from database, using local data:', error);
+        // Fall back to localStorage
+        const raw = localStorage.getItem(KEY);
+        if (raw) {
+          const s = JSON.parse(raw);
+          // Ensure properties have unitNames
+          const propertiesWithUnitNames = (s.properties ?? []).map((p: any) => ({
+            ...p,
+            unitNames: p.unitNames || Array.from({ length: p.units }, (_, i) => `Unit ${i + 1}`)
+          }));
+          setProperties(propertiesWithUnitNames);
+          setTenants(s.tenants ?? []);
+          setPayments(s.payments ?? []);
+          setMaintenance(s.maintenance ?? []);
+          setComplaints(s.complaints ?? []);
+          setNotifications(s.notifications ?? []);
+          setWaMessages(s.waMessages ?? []);
+        } else {
+          console.log('ℹ️ No local data found, starting with empty state');
+          setProperties([]);
+          setTenants([]);
+          setPayments([]);
+          setMaintenance([]);
+          setComplaints([]);
+          setNotifications([]);
+          setWaMessages([]);
+        }
       }
-    } catch (error) {
-      console.error('Failed to load local data:', error);
-    }
+    };
+
+    loadData();
   }, [isAuthenticated, isLoading]);
 
   // Persist
@@ -466,8 +545,61 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const addTenant: Ctx["addTenant"] = (t) => {
-    const tenant = { ...t, id: uid("t") } as Tenant;
+    const tenant = { ...t, id: uid("t"), createdAt: new Date().toISOString() } as Tenant;
     setTenants(prev => [tenant, ...prev]);
+
+    // If tenant is added with "paid" status, create a payment record
+    if (t.status === "paid") {
+      const payment: Payment = {
+        id: uid("pay"),
+        tenantId: tenant.id,
+        tenantName: tenant.name,
+        amount: tenant.rent,
+        period: "Initial Payment", // Or current period
+        method: tenant.method,
+        reference: `INIT-${tenant.id.slice(-6).toUpperCase()}`,
+        paidAt: new Date().toISOString(),
+        status: "paid",
+        createdAt: new Date().toISOString(),
+      };
+      setPayments(prev => [payment, ...prev]);
+
+      // Sync payment to server
+      api.syncPayment({ ...payment }).catch(e => console.warn('Payment sync failed', e));
+
+      pushNotification({
+        type: "payment",
+        title: "Initial payment recorded",
+        body: `${formatKsh(payment.amount)} from ${payment.tenantName} (${payment.period})`,
+      });
+    }
+
+    // Update property occupancy and unitNames
+    const property = properties.find(p => p.name === t.property);
+    if (property) {
+      const updates: Partial<Property> = { occupied: property.occupied + 1 };
+
+      // Check if this unit name already exists
+      if (!property.unitNames.includes(t.unit)) {
+        // Find vacant unit names (unitNames that don't have tenants)
+        const occupiedUnits = tenants.filter(tn => tn.property === t.property).map(tn => tn.unit);
+        const vacantUnitNames = property.unitNames.filter(name => !occupiedUnits.includes(name));
+
+        if (vacantUnitNames.length > 0) {
+          // Replace a vacant unit name with the new one (rename operation)
+          const indexToReplace = property.unitNames.indexOf(vacantUnitNames[0]);
+          const newUnitNames = [...property.unitNames];
+          newUnitNames[indexToReplace] = t.unit;
+          updates.unitNames = newUnitNames;
+        } else {
+          // Add new unit name and increment count
+          updates.unitNames = [...property.unitNames, t.unit];
+          updates.units = property.units + 1;
+        }
+      }
+
+      updateProperty(property.id, updates);
+    }
 
     // Sync to server so WhatsApp bot can look up by phone
     api.syncTenant(tenant).catch(e => console.warn('Tenant sync failed', e));
@@ -489,6 +621,55 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
   const addProperty: Ctx["addProperty"] = (p) =>
     setProperties(prev => [{ ...p, id: uid("p") } as Property, ...prev]);
+
+  const updateProperty: Ctx["updateProperty"] = (id, updates) => {
+    setProperties(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+  };
+
+  const updateTenant: Ctx["updateTenant"] = (id, updates) => {
+    setTenants(prev => prev.map(t => {
+      if (t.id === id) {
+        const updated = { ...t, ...updates };
+        // Sync updated tenant to server so WhatsApp bot can look up by phone
+        api.syncTenant(updated).catch(e => console.warn('Tenant update sync failed', e));
+        return updated;
+      }
+      return t;
+    }));
+  };
+
+  const deleteTenant: Ctx["deleteTenant"] = (id) => {
+    const tenant = tenants.find(t => t.id === id);
+    if (!tenant) return;
+
+    // Remove tenant and all associated data
+    setTenants(prev => prev.filter(t => t.id !== id));
+    setPayments(prev => prev.filter(p => p.tenantId !== id));
+    setComplaints(prev => prev.filter(c => c.tenantId !== id));
+    setWaMessages(prev => prev.filter(m => m.tenantId !== id));
+
+    // Update property occupied count
+    const property = properties.find(p => p.name === tenant.property);
+    if (property) {
+      updateProperty(property.id, { occupied: Math.max(0, property.occupied - 1) });
+    }
+  };
+
+  const deleteUnit: Ctx["deleteUnit"] = (propertyId, unitName) => {
+    const property = properties.find(p => p.id === propertyId);
+    if (!property) return false;
+
+    // Check if unit has a tenant
+    const hasTenant = tenants.some(t => t.property === property.name && t.unit === unitName);
+    if (hasTenant) return false; // Cannot delete occupied unit
+
+    // Unit is vacant, decrement unit count and remove from unitNames
+    updateProperty(propertyId, {
+      units: Math.max(0, property.units - 1),
+      unitNames: property.unitNames.filter(name => name !== unitName)
+    });
+    return true;
+  };
 
   const recordPayment: Ctx["recordPayment"] = async (p) => {
     const tenant = tenants.find(t => t.id === p.tenantId);
@@ -705,12 +886,12 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   // Calculate collection donut data based on tenant balances
   const calculateCollectionDonut = useCallback(() => {
     return tenants.reduce((acc, tenant) => {
-      // Calculate total paid for this tenant
-      const tenantPayments = payments.filter(p => p.tenantId === tenant.id);
+      // Calculate total paid for this tenant (only paid payments)
+      const tenantPayments = payments.filter(p => p.tenantId === tenant.id && p.status === "paid");
       const totalPaid = tenantPayments.reduce((sum, p) => sum + p.amount, 0);
       const outstanding = Math.max(0, tenant.rent - totalPaid);
 
-      // Always add all payments received to collected
+      // Add only paid amounts to collected
       acc[0].value += totalPaid;
 
       // Add outstanding balances to appropriate categories
@@ -812,7 +993,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     : calculateCollectionDonut(),
       payments, complaints, notifications, waMessages,
       leaseFilterDays, setLeaseFilterDays, expiringTenants,
-      addTenant, addTenantsBulk, addProperty, saveProfile,
+      addTenant, addTenantsBulk, updateTenant, deleteTenant, addProperty, updateProperty, deleteUnit, saveProfile,
       recordPayment, recordComplaint, updateComplaintStatus, updateMaintenanceStatus,
       sendWhatsApp, simulateInbound,
       markAllNotificationsRead, markNotificationRead,
