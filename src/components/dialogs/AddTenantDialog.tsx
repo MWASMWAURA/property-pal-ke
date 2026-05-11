@@ -59,7 +59,8 @@ export const AddTenantDialog = ({ trigger, defaultProperty, defaultUnit }: { tri
             </div>
             <div className="space-y-2">
               <Label htmlFor="t-phone">Phone</Label>
-              <Input id="t-phone" placeholder="+254 …" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})}/>
+              <Input id="t-phone" placeholder="07... or +254..." value={form.phone} onChange={e => setForm({...form, phone: e.target.value})}/>
+             
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

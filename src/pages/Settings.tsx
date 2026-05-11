@@ -76,7 +76,7 @@ const Settings = () => {
                 id="phone"
                 value={form.phone}
                 onChange={e => setForm({...form, phone: e.target.value})}
-                placeholder="+254 712 345 678"
+                placeholder="07... or +254..."
                 disabled={true}
               />
             </div>

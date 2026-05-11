@@ -60,9 +60,9 @@ export const OnboardingDialog = () => {
                     <Input
                       value={profile.phone}
                       onChange={e => !phoneVerified && setProfile({...profile, phone: e.target.value})}
-                      placeholder="+254 …"
+                      placeholder="07... or +254..."
                       disabled={phoneVerified}
-                    />
+                    />                
                   </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
