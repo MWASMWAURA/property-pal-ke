@@ -43,26 +43,29 @@ const Units = () => {
 
   return (
     <AppShell title={`${property.name} Units`} subtitle={`${property.units} total · ${propertyTenants.length} occupied · ${vacantCount} vacant`}>
-      <div className="flex items-center gap-3 mb-6">
-        <Link to="/properties">
-          <Button variant="outline" size="sm">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6">
+        <Link to="/properties" className="order-1 sm:order-1">
+          <Button variant="outline" size="sm" className="w-full sm:w-auto touch-manipulation min-h-[44px]">
             <ArrowLeft className="size-4" />
-            Back to Properties
+            <span className="hidden xs:inline">Back to Properties</span>
+            <span className="xs:hidden">Back</span>
           </Button>
         </Link>
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold">{property.name}</h1>
-          <p className="text-sm text-muted-foreground flex items-center gap-1">
+        <div className="flex-1 order-3 sm:order-2 text-center sm:text-left">
+          <h1 className="text-xl sm:text-2xl font-bold">{property.name}</h1>
+          <p className="text-sm text-muted-foreground flex items-center justify-center sm:justify-start gap-1">
             <MapPin className="size-3" />
             {property.location}
           </p>
         </div>
-        <AddUnitDialog property={property} trigger={
-          <Button className="gradient-primary text-primary-foreground">
-            <Plus className="size-4" />
-            Add Unit
-          </Button>
-        } />
+        <div className="order-2 sm:order-3">
+          <AddUnitDialog property={property} trigger={
+            <Button className="gradient-primary text-primary-foreground w-full sm:w-auto touch-manipulation min-h-[44px]">
+              <Plus className="size-4" />
+              Add Unit
+            </Button>
+          } />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-6">
