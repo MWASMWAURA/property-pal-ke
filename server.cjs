@@ -26,6 +26,24 @@ app.use((req, res, next) => {
     next();
 });
 
+// Block attack paths AFTER middleware
+const blockedPaths = [
+  '/api/.env', '/.env',
+  '/api/config', '/api/v1/config', '/api/v2/config',
+  '/api/settings', '/api/v1/settings', '/api/v2/settings',
+  '/api/openapi.json',
+  '/api/health',
+  '/api/env', '/api/v1/env', '/api/v2/env',
+  '/api/account',
+]
+
+app.use((req, res, next) => {
+  if (blockedPaths.includes(req.path)) {
+    return res.status(404).json({ error: 'Not found' })
+  }
+  next()
+})
+
 // Meta WhatsApp Cloud API client (only initialize if credentials exist)
 let metaClient = null;
 let metaPhoneNumberId = process.env.META_PHONE_NUMBER_ID || '';
