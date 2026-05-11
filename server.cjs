@@ -1464,12 +1464,12 @@ Send the command followed by details separated by commas.
             address: address,
             type: type || 'Residential',
             status: 'active',
-            monthlyrent: 0,
-            taxrate: 0,
+            monthly_rent: 0,
+            tax_rate: 0,
             units: JSON.stringify([]),
-            recurringbills: JSON.stringify([]),
-            createdat: new Date().toISOString(),
-            updatedat: new Date().toISOString()
+            recurring_bills: JSON.stringify([]),
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
         };
 
         try {
@@ -3357,10 +3357,10 @@ app.post('/api/sync/payments', authenticateToken, async (req, res) => {
              period = EXCLUDED.period,
              method = EXCLUDED.method,
              reference = EXCLUDED.reference,
-             paid_at = EXCLUDED.paid_at,
-             created_at = EXCLUDED.created_at,
-             status = EXCLUDED.status
-             WHERE landlord_id = $2`,
+              paid_at = EXCLUDED.paid_at,
+              created_at = EXCLUDED.created_at,
+              status = EXCLUDED.status
+              WHERE complaints.landlord_id = $2`,
             [
                 p.id,
                 landlordId,
@@ -3454,7 +3454,7 @@ app.post('/api/sync/properties', authenticateToken, async (req, res) => {
              units = EXCLUDED.units,
              recurring_bills = EXCLUDED.recurring_bills,
              updated_at = EXCLUDED.updated_at
-             WHERE landlord_id = $2`,
+             WHERE properties.landlord_id = $2`,
             [
                 p.id,
                 landlordId,
@@ -3504,11 +3504,11 @@ app.post('/api/sync/tenants', authenticateToken, async (req, res) => {
              rent = EXCLUDED.rent,
              status = EXCLUDED.status,
              method = EXCLUDED.method,
-             due_date = EXCLUDED.due_date,
-             lease_end = EXCLUDED.lease_end,
-             assigned_unit = EXCLUDED.assigned_unit,
-             created_at = EXCLUDED.created_at
-             WHERE landlord_id = $2`,
+              due_date = EXCLUDED.due_date,
+              lease_end = EXCLUDED.lease_end,
+              assigned_unit = EXCLUDED.assigned_unit,
+              created_at = EXCLUDED.created_at
+              WHERE tenants.landlord_id = $2`,
             [
                 t.id,
                 landlordId,
