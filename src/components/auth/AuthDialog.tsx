@@ -448,9 +448,9 @@ export const AuthDialog = ({
                 placeholder="07XXXXXXXX or 01XXXXXXXX"
                 className="h-9 text-sm"
               />
-              <p className="text-xs text-muted-foreground">
+              {/* <p className="text-xs text-muted-foreground">
                 Type your number as 07... or 01... and the system will normalize it to +254 automatically.
-              </p>
+              </p> */}
             </div>
 
             <Button
