@@ -279,12 +279,12 @@ const initDatabase = async () => {
                     address TEXT,
                     type TEXT,
                     status TEXT,
-                    monthlyrent INTEGER,
-                    taxrate INTEGER,
+                    monthly_rent INTEGER,
+                    tax_rate INTEGER,
                     units TEXT,
-                    recurringbills TEXT,
-                    createdat TEXT,
-                    updatedat TEXT,
+                    recurring_bills TEXT,
+                    created_at TEXT,
+                    updated_at TEXT,
                     FOREIGN KEY (landlord_id) REFERENCES landlords(id)
                 );
 
@@ -363,7 +363,7 @@ const initDatabase = async () => {
                     read INTEGER DEFAULT 0,
                     recipient TEXT,
                     message TEXT,
-                    sentat TEXT,
+                    sent_at TEXT,
                     status TEXT,
                     FOREIGN KEY (landlord_id) REFERENCES landlords(id)
                 );
@@ -447,12 +447,12 @@ const initDatabase = async () => {
                     address TEXT,
                     type TEXT,
                     status TEXT,
-                    monthlyrent INTEGER,
-                    taxrate INTEGER,
+                    monthly_rent INTEGER,
+                    tax_rate INTEGER,
                     units TEXT,
-                    recurringbills TEXT,
-                    createdat TEXT,
-                    updatedat TEXT
+                    recurring_bills TEXT,
+                    created_at TEXT,
+                    updated_at TEXT
                 );
             `);
 
@@ -536,7 +536,7 @@ const initDatabase = async () => {
                     read BOOLEAN DEFAULT false,
                     recipient TEXT,
                     message TEXT,
-                    sentat TEXT,
+                    sent_at TEXT,
                     status TEXT
                 );
             `);
@@ -660,9 +660,11 @@ const normalizePropertyRow = (row) => ({
   ...row,
   location: row.address,
   unitNames: loadJson(row.units, []),
-  monthlyRent: row.monthlyrent != null ? Number(row.monthlyrent) : row.monthlyrent,
-  taxRate: row.taxrate != null ? Number(row.taxrate) : row.taxrate,
-  recurringBills: loadJson(row.recurringbills, [])
+  monthlyRent: row.monthly_rent != null ? Number(row.monthly_rent) : row.monthly_rent,
+  taxRate: row.tax_rate != null ? Number(row.tax_rate) : row.tax_rate,
+  recurringBills: loadJson(row.recurring_bills, []),
+  createdAt: row.created_at,
+  updatedAt: row.updated_at
 });
 
 // Helper functions for database queries (works with both PostgreSQL and SQLite)
@@ -752,18 +754,22 @@ const normalizeWaMessageRow = (row) => ({
 const normalizeNotificationRow = (row) => ({
   ...row,
   createdAt: row.created_at,
-  sentAt: row.sentat
+  sentAt: row.sent_at
 });
 
 
 
 const persistProperty = (property) => db.prepare(
-  `INSERT OR REPLACE INTO properties (id, name, address, type, status, monthlyRent, taxRate, units, recurringBills, createdAt, updatedAt)
-   VALUES (@id, @name, @address, @type, @status, @monthlyRent, @taxRate, @units, @recurringBills, @createdAt, @updatedAt)`
+  `INSERT OR REPLACE INTO properties (id, name, address, type, status, monthly_rent, tax_rate, units, recurring_bills, created_at, updated_at)
+   VALUES (@id, @name, @address, @type, @status, @monthly_rent, @tax_rate, @units, @recurring_bills, @created_at, @updated_at)`
 ).run({
   ...property,
   units: JSON.stringify(property.units || []),
-  recurringBills: JSON.stringify(property.recurringBills || [])
+  recurring_bills: JSON.stringify(property.recurringBills || []),
+  monthly_rent: property.monthlyRent,
+  tax_rate: property.taxRate,
+  created_at: property.createdAt || new Date().toISOString(),
+  updated_at: property.updatedAt || new Date().toISOString()
 });
 
 const deleteProperty = (propertyId) => db.prepare('DELETE FROM properties WHERE id = ?').run(propertyId);
@@ -845,14 +851,14 @@ const persistWaMessage = (message) => db.prepare(
 });
 
 const persistNotification = (notification) => db.prepare(
-  `INSERT OR REPLACE INTO notifications (id, type, title, body, created_at, read, recipient, message, sentAt, status)
-   VALUES (@id, @type, @title, @body, @created_at, @read, @recipient, @message, @sentAt, @status)`
+  `INSERT OR REPLACE INTO notifications (id, type, title, body, created_at, read, recipient, message, sent_at, status)
+   VALUES (@id, @type, @title, @body, @created_at, @read, @recipient, @message, @sent_at, @status)`
 ).run({
   ...notification,
   created_at: notification.createdAt || new Date().toISOString(),
   read: notification.read ? 1 : 0,
   message: notification.message || null,
-  sentAt: notification.sentAt || null,
+  sent_at: notification.sentAt || null,
   status: notification.status || 'sent'
 });
 
@@ -3436,18 +3442,18 @@ app.post('/api/sync/properties', authenticateToken, async (req, res) => {
 
         // Insert or update property with landlord_id
         await query(
-            `INSERT INTO properties (id, landlord_id, name, address, type, status, monthlyrent, taxrate, units, recurringbills, createdat, updatedat)
+            `INSERT INTO properties (id, landlord_id, name, address, type, status, monthly_rent, tax_rate, units, recurring_bills, created_at, updated_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
              ON CONFLICT (id) DO UPDATE SET
              name = EXCLUDED.name,
              address = EXCLUDED.address,
              type = EXCLUDED.type,
              status = EXCLUDED.status,
-             monthlyrent = EXCLUDED.monthlyrent,
-             taxrate = EXCLUDED.taxrate,
+             monthly_rent = EXCLUDED.monthly_rent,
+             tax_rate = EXCLUDED.tax_rate,
              units = EXCLUDED.units,
-             recurringbills = EXCLUDED.recurringbills,
-             updatedat = EXCLUDED.updatedat
+             recurring_bills = EXCLUDED.recurring_bills,
+             updated_at = EXCLUDED.updated_at
              WHERE landlord_id = $2`,
             [
                 p.id,
