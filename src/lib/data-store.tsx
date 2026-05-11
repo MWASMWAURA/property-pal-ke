@@ -59,6 +59,17 @@ export type WaMessage = {
   channel: "bot" | "landlord";
 };
 
+export type MaintenanceRequest = {
+  id: string;
+  tenant: string;
+  unit: string;
+  category: string;
+  priority: "low" | "medium" | "high" | "urgent";
+  description: string;
+  status: "pending" | "in_progress" | "resolved";
+  created: string;
+};
+
 
 
 type Mode = "demo" | "live" | "unset";
@@ -81,7 +92,7 @@ type Ctx = {
   isLoading: boolean;
   properties: Property[];
   tenants: Tenant[];
-  maintenance: typeof seedMaintenance;
+  maintenance: MaintenanceRequest[];
   messages: typeof seedMessages;
   revenueByMonth: typeof seedRevenue;
   collectionDonut: typeof seedDonut;
@@ -114,6 +125,7 @@ type Ctx = {
     notify?: boolean;
   }) => Promise<Complaint>;
   updateComplaintStatus: (id: string, status: Complaint["status"]) => void;
+  updateMaintenanceStatus: (id: string, status: MaintenanceRequest["status"]) => void;
 
   sendWhatsApp: (tenantId: string, body: string, channel?: WaMessage["channel"]) => void;
   simulateInbound: (tenantId: string, body: string) => void;
@@ -176,56 +188,7 @@ const parseDMY = (s: string): Date | null => {
   return new Date(+m[3], +m[2] - 1, +m[1]);
 };
 
-// Sync queue management
-const addToSyncQueue = (operation: Omit<SyncOperation, 'id' | 'timestamp' | 'retries'>) => {
-  const syncOp: SyncOperation = {
-    ...operation,
-    id: uid('sync'),
-    timestamp: Date.now(),
-    retries: 0
-  };
-  setSyncQueue(prev => [...prev, syncOp]);
-  const existing = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]');
-  localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify([...existing, syncOp]));
-};
 
-const removeFromSyncQueue = (id: string) => {
-  setSyncQueue(prev => prev.filter(op => op.id !== id));
-  const existing = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]');
-  localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(existing.filter((op: SyncOperation) => op.id !== id)));
-};
-
-const processSyncQueue = async () => {
-  if (!isOnline || !isAuthenticated) return;
-
-  const queue = [...syncQueue];
-  for (const operation of queue) {
-    try {
-      switch (operation.type) {
-        case 'property':
-          await api.syncProperty(operation.data);
-          break;
-        case 'tenant':
-          await api.syncTenant(operation.data);
-          break;
-        case 'payment':
-          await api.syncPayment(operation.data);
-          break;
-      }
-      removeFromSyncQueue(operation.id);
-    } catch (error) {
-      console.warn(`Sync failed for ${operation.type}, will retry:`, error);
-      // Increment retry count, remove after 5 failed attempts
-      if (operation.retries >= 5) {
-        removeFromSyncQueue(operation.id);
-      } else {
-        setSyncQueue(prev => prev.map(op =>
-          op.id === operation.id ? { ...op, retries: op.retries + 1 } : op
-        ));
-      }
-    }
-  }
-};
 
 export const DataProvider = ({ children }: { children: ReactNode }) => {
   const [mode, setMode] = useState<Mode>("unset");
@@ -235,7 +198,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   const [properties, setProperties] = useState<Property[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
-  const [maintenance, setMaintenance] = useState<typeof seedMaintenance>([]);
+  const [maintenance, setMaintenance] = useState<MaintenanceRequest[]>([]);
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [waMessages, setWaMessages] = useState<WaMessage[]>([]);
@@ -246,7 +209,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   // Authentication methods (inside component so they can access state setters)
-  const register = async (data: Parameters<Ctx["register"]>[0]): Promise<ReturnType<Ctx["register"]>> => {
+  const register = async (data: Parameters<Ctx["register"]>[0]): Promise<{ landlord: LandlordProfile; token: string }> => {
     const response = await fetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -265,7 +228,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     return result;
   };
 
-  const login = async (email: string, password: string): Promise<ReturnType<Ctx["login"]>> => {
+  const login = async (email: string, password: string): Promise<{ landlord: LandlordProfile; token: string }> => {
     const response = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -325,6 +288,57 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       setIsAuthenticated(false);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Sync queue management
+  const addToSyncQueue = (operation: Omit<SyncOperation, 'id' | 'timestamp' | 'retries'>) => {
+    const syncOp: SyncOperation = {
+      ...operation,
+      id: uid('sync'),
+      timestamp: Date.now(),
+      retries: 0
+    };
+    setSyncQueue(prev => [...prev, syncOp]);
+    const existing = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]');
+    localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify([...existing, syncOp]));
+  };
+
+  const removeFromSyncQueue = (id: string) => {
+    setSyncQueue(prev => prev.filter(op => op.id !== id));
+    const existing = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]');
+    localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(existing.filter((op: SyncOperation) => op.id !== id)));
+  };
+
+  const processSyncQueue = async () => {
+    if (!isOnline || !isAuthenticated) return;
+
+    const queue = [...syncQueue];
+    for (const operation of queue) {
+      try {
+        switch (operation.type) {
+          case 'property':
+            await api.syncProperty(operation.data);
+            break;
+          case 'tenant':
+            await api.syncTenant(operation.data);
+            break;
+          case 'payment':
+            await api.syncPayment(operation.data);
+            break;
+        }
+        removeFromSyncQueue(operation.id);
+      } catch (error) {
+        console.warn(`Sync failed for ${operation.type}, will retry:`, error);
+        // Increment retry count, remove after 5 failed attempts
+        if (operation.retries >= 5) {
+          removeFromSyncQueue(operation.id);
+        } else {
+          setSyncQueue(prev => prev.map(op =>
+            op.id === operation.id ? { ...op, retries: op.retries + 1 } : op
+          ));
+        }
+      }
     }
   };
 
@@ -466,8 +480,9 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             }));
           return newOnes.length > 0 ? [...newOnes, ...prev] : prev;
         });
-      } catch {
-        // Server offline — silent fail, local data still works
+      } catch (error) {
+        console.warn('Failed to poll notifications from server:', error);
+        // Server offline or error — silent fail, local data still works
       }
     };
 
@@ -478,7 +493,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
   // Poll for complaints from server
   useEffect(() => {
-    if (mode === 'unset') return;
+    if (mode === 'unset' || !isAuthenticated) return;
 
     const pollComplaints = async () => {
       try {
@@ -530,6 +545,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
     if (!profile) {
       setProfile({
+        id: uid('landlord'),
         name: "James Kariuki",
         email: "james.kariuki@demo.com",
         phone: "+254 712 345 678",
@@ -630,7 +646,6 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         reference: `INIT-${tenant.id.slice(-6).toUpperCase()}`,
         paidAt: new Date().toISOString(),
         status: "paid",
-        createdAt: new Date().toISOString(),
       };
       setPayments(prev => [payment, ...prev]);
 
@@ -890,7 +905,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const updateMaintenanceStatus = (id: string, status: typeof seedMaintenance[number]["status"]) => {
+  const updateMaintenanceStatus = (id: string, status: MaintenanceRequest["status"]) => {
     setMaintenance(prev => prev.map(m => m.id === id ? { ...m, status } : m));
   };
 
@@ -1085,23 +1100,51 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   const value = useMemo<Ctx>(() => {
     const isDemo = mode === "demo";
     return {
-      mode, profile, isAuthenticated, isLoading, properties, tenants,
+      mode,
+      profile,
+      isAuthenticated,
+      isLoading,
+      properties,
+      tenants,
       maintenance,
-  messages: isDemo ? seedMessages : [],
-  revenueByMonth: isDemo ? seedRevenue : calculateRevenueByMonth(),
-  collectionDonut: isDemo
-    ? seedDonut
-    : calculateCollectionDonut(),
-      payments, complaints, notifications, waMessages,
-      leaseFilterDays, setLeaseFilterDays, expiringTenants,
-      addTenant, addTenantsBulk, updateTenant, deleteTenant, addProperty, updateProperty, deleteUnit, saveProfile,
-      recordPayment, recordComplaint, updateComplaintStatus, updateMaintenanceStatus,
-      sendWhatsApp, simulateInbound,
-      markAllNotificationsRead, markNotificationRead,
-      startDemo, startFresh, resetToOwnData,
-      needsOnboarding, setNeedsOnboarding,
-      tourActive, startTour: () => setTourActive(true), stopTour: () => setTourActive(false),
-      register, login, logout, loadProfile,
+      messages: isDemo ? seedMessages : [],
+      revenueByMonth: isDemo ? seedRevenue : calculateRevenueByMonth(),
+      collectionDonut: isDemo ? seedDonut : calculateCollectionDonut(),
+      payments,
+      complaints,
+      notifications,
+      waMessages,
+      leaseFilterDays,
+      setLeaseFilterDays,
+      expiringTenants,
+      addTenant,
+      addTenantsBulk,
+      updateTenant,
+      deleteTenant,
+      addProperty,
+      updateProperty,
+      deleteUnit,
+      saveProfile,
+      recordPayment,
+      recordComplaint,
+      updateComplaintStatus,
+      updateMaintenanceStatus,
+      sendWhatsApp,
+      simulateInbound,
+      markAllNotificationsRead,
+      markNotificationRead,
+      startDemo,
+      startFresh,
+      resetToOwnData,
+      needsOnboarding,
+      setNeedsOnboarding,
+      tourActive,
+      startTour: () => setTourActive(true),
+      stopTour: () => setTourActive(false),
+      register,
+      login,
+      logout,
+      loadProfile,
     };
   }, [mode, profile, isAuthenticated, isLoading, properties, tenants, payments, complaints, notifications, waMessages, leaseFilterDays, needsOnboarding, tourActive, expiringTenants, botProcess, calculateRevenueByMonth, calculateCollectionDonut]);
 
