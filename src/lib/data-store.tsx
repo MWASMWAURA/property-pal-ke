@@ -63,6 +63,14 @@ export type WaMessage = {
 
 type Mode = "demo" | "live" | "unset";
 
+export type LandlordBilling = {
+  walletBalance: number;
+  whatsappBalance: number;
+  smsBalance: number;
+  currentPlan?: string;
+  lastTopUp?: string;
+};
+
 export type LandlordProfile = {
   id: string;
   name: string;
@@ -72,6 +80,7 @@ export type LandlordProfile = {
   city: string;
   preferredChannel: "whatsapp" | "sms" | "email";
   collectionMonthStart: number;
+  billing?: LandlordBilling;
 };
 
 type Ctx = {
@@ -586,22 +595,31 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const saveProfile = async (p: LandlordProfile) => {
+    const mergedProfile = {
+      ...(profile ?? {}),
+      ...p,
+      billing: {
+        ...(profile?.billing ?? {}),
+        ...(p.billing ?? {}),
+      },
+    } as LandlordProfile;
+
     try {
       const response = await fetch('/api/auth/me', {
         method: 'PUT',
         headers: getAuthHeaders(),
-        body: JSON.stringify(p),
+        body: JSON.stringify(mergedProfile),
       });
 
       if (!response.ok) {
         throw new Error('Failed to update profile');
       }
 
-      setProfile(p);
+      setProfile(mergedProfile);
     } catch (error) {
       console.error('Failed to save profile:', error);
       // Still update local state for offline functionality
-      setProfile(p);
+      setProfile(mergedProfile);
     }
   };
 

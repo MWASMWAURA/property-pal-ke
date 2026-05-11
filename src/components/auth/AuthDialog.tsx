@@ -442,11 +442,15 @@ export const AuthDialog = ({
               </Label>
               <Input
                 id="phone"
+                inputMode="tel"
                 value={form.phone}
                 onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                placeholder="+254 700 000 000"
+                placeholder="07XXXXXXXX or 01XXXXXXXX"
                 className="h-9 text-sm"
               />
+              <p className="text-xs text-muted-foreground">
+                Type your number as 07... or 01... and the system will normalize it to +254 automatically.
+              </p>
             </div>
 
             <Button

@@ -80,7 +80,7 @@ export const MobileNav = () => {
   ];
   
   return (
-    <nav className="lg:hidden fixed bottom-0 inset-x-0 bg-sidebar text-sidebar-foreground border-t border-sidebar-border z-40 px-2 py-2 overflow-x-auto">
+    <nav className="lg:hidden fixed bottom-0 inset-x-0 bg-sidebar text-sidebar-foreground border-t border-sidebar-border z-40 px-2 py-3 pb-4 overflow-x-auto">
       <div className="flex justify-start min-w-max gap-1">
         {mobileNav.map(({ to, icon: Icon, label }) => (
           <NavLink

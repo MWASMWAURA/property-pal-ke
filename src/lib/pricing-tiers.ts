@@ -1,65 +1,83 @@
 export type PricingTier = {
   name: string;
   price: string;
+  suffix?: string;
   tagline: string;
   features: string[];
   cta: string;
   highlight?: boolean;
-  suffix?: string;
+  maxProperties: number;
+  maxUnitsPerProperty: number;
 };
 
 export const tiers: PricingTier[] = [
   {
     name: "Starter",
     price: "Free",
-    tagline: "For landlords with up to 10 units",
+    tagline: "One property with up to 12 units",
     features: [
-      "Up to 10 units",
-      "WhatsApp bot (shared number)",
+      "1 property",
+      "Up to 12 units",
+      "Shared WhatsApp bot",
       "M-Pesa payment tracking",
       "Tenant CRM & lease timeline",
-      "CSV bulk import",
       "Email support",
     ],
     cta: "Start free",
     highlight: false,
+    maxProperties: 1,
+    maxUnitsPerProperty: 12,
   },
   {
     name: "Growth",
-    price: "KSh 2,500",
+    price: "KSh 250",
     suffix: "/month",
-    tagline: "For growing portfolios 11–100 units",
+    tagline: "Up to 2 properties with 12–20 units each",
     features: [
-      "Up to 100 units",
+      "Up to 2 properties",
+      "12–20 units per property",
       "Dedicated WhatsApp number",
       "Auto reminders & receipts",
-      "Maintenance Kanban + vendors",
       "Owner P&L reports",
       "Priority WhatsApp support",
     ],
-    cta: "Start 14-day trial",
+    cta: "Choose Growth",
     highlight: true,
+    maxProperties: 2,
+    maxUnitsPerProperty: 20,
   },
   {
-    name: "Scale",
+    name: "Custom",
     price: "Custom",
-    tagline: "For agencies & 100+ units",
+    tagline: "More than 2 properties or 50+ units per property",
     features: [
-      "Unlimited units & properties",
-      "Multi-landlord workspaces",
-      "API & webhook access",
+      "Large portfolios",
+      "Flexible property counts",
+      "High-capacity buildings",
       "Custom WhatsApp templates",
-      "Investor portal",
-      "Dedicated account manager",
+      "API & webhook access",
+      "Dedicated onboarding support",
     ],
-    cta: "Talk to sales",
+    cta: "Contact sales",
     highlight: false,
+    maxProperties: Infinity,
+    maxUnitsPerProperty: Infinity,
   },
 ];
 
-export const getTierByUnitCount = (units: number) => {
-  if (units <= 10) return tiers[0];
-  if (units <= 100) return tiers[1];
+export const getTierForProperties = (properties: { units: number }[]) => {
+  if (properties.length === 0) return tiers[0];
+  const propertyCount = properties.length;
+  const maxUnitsPerProperty = Math.max(...properties.map((property) => property.units || 0));
+
+  if (propertyCount <= 1 && maxUnitsPerProperty <= 12) {
+    return tiers[0];
+  }
+
+  if (propertyCount <= 2 && maxUnitsPerProperty <= 20) {
+    return tiers[1];
+  }
+
   return tiers[2];
 };
 

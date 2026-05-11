@@ -43,14 +43,14 @@ const Units = () => {
 
   return (
     <AppShell title={`${property.name} Units`} subtitle={`${property.units} total · ${propertyTenants.length} occupied · ${vacantCount} vacant`}>
-      <div className="flex items-center gap-3 mb-6">
-        <Link to="/properties">
-          <Button variant="outline" size="sm">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3 mb-6">
+        <Link to="/properties" className="w-full sm:w-auto">
+          <Button variant="outline" size="sm" className="w-full sm:w-auto">
             <ArrowLeft className="size-4" />
             Back to Properties
           </Button>
         </Link>
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-bold">{property.name}</h1>
           <p className="text-sm text-muted-foreground flex items-center gap-1">
             <MapPin className="size-3" />
@@ -58,7 +58,7 @@ const Units = () => {
           </p>
         </div>
         <AddUnitDialog property={property} trigger={
-          <Button className="gradient-primary text-primary-foreground">
+          <Button className="gradient-primary text-primary-foreground w-full sm:w-auto">
             <Plus className="size-4" />
             Add Unit
           </Button>
@@ -148,7 +148,7 @@ const Units = () => {
                 defaultProperty={property.name}
                 defaultUnit={unitName}
                 trigger={
-                  <Button size="sm" variant="outline">
+                  <Button size="sm" variant="outline" className="w-full sm:w-auto">
                     <Plus className="size-3" />
                     Add Tenant
                   </Button>
@@ -171,7 +171,7 @@ const Units = () => {
               <AddTenantDialog
                 defaultProperty={property.name}
                 trigger={
-                  <Button size="sm" variant="outline">
+                  <Button size="sm" variant="outline" className="w-full sm:w-auto">
                     <Plus className="size-3" />
                     Add Tenant
                   </Button>

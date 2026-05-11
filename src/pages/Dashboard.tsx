@@ -48,14 +48,14 @@ const Dashboard = () => {
       )}
 
       {/* HERO KPI BAND */}
-      <section data-tour="hero-kpis" className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 animate-slide-up">
+      <section data-tour="hero-kpis" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 animate-slide-up">
         <KpiCard
           urgent
           icon={<AlertTriangle className="size-5" />}
           label="Overdue"
           value={formatKsh(overdueAmount)}
           sub={`${overdueTenants.length} tenants behind`}
-          action={<Button size="sm" variant="secondary" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur"><MessageCircle className="size-3.5"/> Chase via WhatsApp</Button>}
+          action={<Button size="sm" variant="secondary" className="w-full sm:w-auto justify-center gap-2 bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur"><MessageCircle className="size-3.5"/> Chase via WhatsApp</Button>}
         />
         <KpiCard
           icon={<Home className="size-5" />}
