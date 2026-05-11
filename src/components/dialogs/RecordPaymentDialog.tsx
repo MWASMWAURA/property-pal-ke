@@ -42,8 +42,10 @@ export const RecordPaymentDialog = ({
       period: form.period,
       method: form.method,
       reference: form.reference || undefined,
+      status: "paid",
     });
-    toast({ title: "Payment recorded", description: `${tenant.name} · ${form.period}. WhatsApp receipt sent.` });
+    // Temporarily hiding WhatsApp confirmation toast for this version
+    // toast({ title: "Payment recorded", description: `${tenant.name} · ${form.period}. WhatsApp receipt sent.` });
     setOpen(false);
     setForm(initial());
   };

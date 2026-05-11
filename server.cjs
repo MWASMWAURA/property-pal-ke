@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || ['https://property-pal-ke.onrender.com', 'http://localhost:5173', 'http://localhost:5174'],
+  origin: ['property.mwasmwaura.co.ke','https://property-pal-ke.onrender.com', 'http://localhost:5173', 'http://localhost:5174'],
   credentials: true
 }));
 app.use(bodyParser.json());
@@ -25,24 +25,6 @@ app.use((req, res, next) => {
     console.log(`[REQUEST] ${req.method} ${req.path} - Origin: ${req.headers.origin} - User-Agent: ${req.headers['user-agent']?.substring(0, 50)}...`);
     next();
 });
-
-// Block attack paths AFTER middleware
-const blockedPaths = [
-  '/api/.env', '/.env',
-  '/api/config', '/api/v1/config', '/api/v2/config',
-  '/api/settings', '/api/v1/settings', '/api/v2/settings',
-  '/api/openapi.json',
-  '/api/health',
-  '/api/env', '/api/v1/env', '/api/v2/env',
-  '/api/account',
-]
-
-app.use((req, res, next) => {
-  if (blockedPaths.includes(req.path)) {
-    return res.status(404).json({ error: 'Not found' })
-  }
-  next()
-})
 
 // Meta WhatsApp Cloud API client (only initialize if credentials exist)
 let metaClient = null;
@@ -91,9 +73,7 @@ const sendSMS = async (to, message) => {
 
   try {
     console.log(`📤 Sending real SMS via Talksasa API...`);
-    console.log(`📱 User-Agent: ${process.env.USER_AGENT || 'Unknown'}`);
-    console.log(`🌐 Request Origin: ${process.env.REQUEST_ORIGIN || 'Unknown'}`);
-
+    
     const response = await fetch('https://bulksms.talksasa.com/api/v3/sms/send', {
       method: 'POST',
       headers: {
@@ -234,6 +214,27 @@ const authenticateToken = (req, res, next) => {
     });
 };
 
+// Secure API middleware: protect all /api routes except public auth/webhook/info endpoints
+const publicApiPaths = [
+    '/auth/send-otp',
+    '/auth/verify-otp',
+    '/auth/register',
+    '/auth/login',
+    '/auth/forgot-password',
+    '/auth/reset-password',
+    '/whatsapp/webhook',
+    '/localization',
+    '/support',
+    '/support/ticket'
+];
+
+app.use('/api', (req, res, next) => {
+    if (publicApiPaths.some(path => req.path === path || req.path.startsWith(path + '/'))) {
+        return next();
+    }
+    return authenticateToken(req, res, next);
+});
+
 // Generate JWT token
 const generateToken = (landlord) => {
     return jwt.sign(
@@ -261,6 +262,11 @@ const initDatabase = async () => {
                     city TEXT,
                     preferred_channel TEXT DEFAULT 'whatsapp',
                     collection_month_start INTEGER DEFAULT 1,
+                    wallet_balance INTEGER DEFAULT 0,
+                    whatsapp_balance INTEGER DEFAULT 0,
+                    sms_balance INTEGER DEFAULT 0,
+                    current_plan TEXT,
+                    last_top_up TEXT,
                     password_hash TEXT NOT NULL,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -389,6 +395,18 @@ const initDatabase = async () => {
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
             `);
+
+            try {
+                db.exec(`
+                    ALTER TABLE landlords ADD COLUMN wallet_balance INTEGER DEFAULT 0;
+                    ALTER TABLE landlords ADD COLUMN whatsapp_balance INTEGER DEFAULT 0;
+                    ALTER TABLE landlords ADD COLUMN sms_balance INTEGER DEFAULT 0;
+                    ALTER TABLE landlords ADD COLUMN current_plan TEXT;
+                    ALTER TABLE landlords ADD COLUMN last_top_up TEXT;
+                `);
+            } catch (error) {
+                // Existing schema already has billing columns or SQLite ALTER TABLE not supported
+            }
             console.log('✅ SQLite database tables created/verified with landlord support');
         } else {
             // PostgreSQL initialization with landlord_id
@@ -402,10 +420,23 @@ const initDatabase = async () => {
                     city TEXT,
                     preferred_channel TEXT DEFAULT 'whatsapp',
                     collection_month_start INTEGER DEFAULT 1,
+                    wallet_balance INTEGER DEFAULT 0,
+                    whatsapp_balance INTEGER DEFAULT 0,
+                    sms_balance INTEGER DEFAULT 0,
+                    current_plan TEXT,
+                    last_top_up TEXT,
                     password_hash TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT NOW(),
                     updated_at TIMESTAMP DEFAULT NOW()
                 );
+            `);
+
+            await db.query(`
+                ALTER TABLE landlords ADD COLUMN IF NOT EXISTS wallet_balance INTEGER DEFAULT 0;
+                ALTER TABLE landlords ADD COLUMN IF NOT EXISTS whatsapp_balance INTEGER DEFAULT 0;
+                ALTER TABLE landlords ADD COLUMN IF NOT EXISTS sms_balance INTEGER DEFAULT 0;
+                ALTER TABLE landlords ADD COLUMN IF NOT EXISTS current_plan TEXT;
+                ALTER TABLE landlords ADD COLUMN IF NOT EXISTS last_top_up TEXT;
             `);
 
             await db.query(`
@@ -874,7 +905,11 @@ const kenyaUtils = {
             return `+${cleaned}`;
         } else if (cleaned.startsWith('07') && cleaned.length === 10) {
             return `+254${cleaned.substring(1)}`;
+        } else if (cleaned.startsWith('01') && cleaned.length === 10) {
+            return `+254${cleaned.substring(1)}`;
         } else if (cleaned.startsWith('7') && cleaned.length === 9) {
+            return `+254${cleaned}`;
+        } else if (cleaned.startsWith('1') && cleaned.length === 9) {
             return `+254${cleaned}`;
         } else if (!cleaned.startsWith('+') && cleaned.length >= 9) {
             return `+${cleaned}`;
@@ -888,7 +923,9 @@ const kenyaUtils = {
         const cleaned = phone.replace(/\D/g, '');
         return cleaned.startsWith('254') && cleaned.length === 12 ||
                cleaned.startsWith('07') && cleaned.length === 10 ||
-               cleaned.startsWith('7') && cleaned.length === 9;
+               cleaned.startsWith('01') && cleaned.length === 10 ||
+               cleaned.startsWith('7') && cleaned.length === 9 ||
+               cleaned.startsWith('1') && cleaned.length === 9;
     },
 
     // Get default currency symbol
@@ -1231,6 +1268,522 @@ async sendWhatsAppMessage(to, message) {
     }
 }
 
+function buildReceiptMessage(payment, tenant, property, channel = 'whatsapp') {
+    const bold = channel === 'whatsapp' ? '*' : '';
+    const lines = [];
+    lines.push(`${bold}PROPERTYHUB KENYA${bold}`);
+    lines.push(`${bold}PAYMENT RECEIPT${bold}`);
+    lines.push('------------------------------');
+    lines.push(`Receipt No: RCP-${payment.id?.substring(0, 8).toUpperCase()}`);
+    lines.push(`Tenant: ${tenant.name}`);
+    lines.push(`Phone: ${tenant.phone || 'N/A'}`);
+    if (property) {
+        lines.push(`Property: ${property.name || property.address || 'N/A'}`);
+        if (property.unitNumber) lines.push(`Unit: ${property.unitNumber}`);
+    }
+    lines.push('------------------------------');
+    lines.push(`Amount: ${kenyaUtils.formatKES(payment.amount)}`);
+    lines.push(`Period: ${payment.period}`);
+    lines.push(`Paid: ${kenyaUtils.formatDate(payment.paid_at || payment.paidAt || new Date().toISOString())}`);
+    lines.push(`Status: Paid`);
+    lines.push('------------------------------');
+    lines.push('Thank you for your payment.');
+    lines.push('Contact your landlord if you need a detailed invoice.');
+    return lines.join('\n');
+}
+
+async function sendTenantReceipt(landlordId, tenant, payment) {
+    const landlord = await queryOne('SELECT * FROM landlords WHERE id = $1', [landlordId]);
+    const property = properties.find(p => p.id === tenant.property || tenant.assignedUnit?.propertyId);
+    const whatsappBalance = Number(landlord?.whatsapp_balance || landlord?.whatsappBalance || 0);
+    const smsBalance = Number(landlord?.sms_balance || landlord?.smsBalance || 0);
+
+    if (whatsappBalance > 0) {
+        const receiptText = buildReceiptMessage(payment, tenant, property, 'whatsapp');
+        const whatsappResult = await whatsappProcessor.sendWhatsAppMessage(tenant.phone, receiptText);
+        if (whatsappResult.success) {
+            return { success: true, channel: 'whatsapp' };
+        }
+        if (smsBalance > 0) {
+            const smsText = buildReceiptMessage(payment, tenant, property, 'sms');
+            await sendSMS(tenant.phone, smsText);
+            return { success: true, channel: 'sms', fallback: true };
+        }
+        return { success: false, error: whatsappResult.error || 'whatsapp_failed' };
+    }
+
+    if (smsBalance > 0) {
+        const receiptText = buildReceiptMessage(payment, tenant, property, 'sms');
+        return await sendSMS(tenant.phone, receiptText);
+    }
+
+    return { success: false, error: 'no_message_balance' };
+}
+
+class LandlordWhatsAppCommandProcessor {
+    constructor() {
+        this.commands = {
+            'MENU': this.showMenu.bind(this),
+            'HELP': this.showMenu.bind(this),
+            'START': this.showMenu.bind(this),
+            'ADD_PROPERTY': this.addProperty.bind(this),
+            'ADD_TENANT': this.addTenant.bind(this),
+            'RECORD_PAYMENT': this.recordPayment.bind(this),
+            'PAYMENT_HISTORY': this.getPaymentHistory.bind(this),
+            'TENANT_HISTORY': this.getPaymentHistory.bind(this),
+            'BALANCE': this.checkTenantBalance.bind(this),
+            'STATUS': this.getSystemStatus.bind(this),
+            'STATS': this.getSystemStatus.bind(this),
+            'LOG_COMPLAINT': this.logComplaint.bind(this),
+            'VIEW_COMPLAINTS': this.viewComplaints.bind(this),
+            'RESOLVE_COMPLAINT': this.resolveComplaint.bind(this)
+        };
+    }
+
+    async process(sender, message, landlordData) {
+        const cleanedMsg = message.trim().toUpperCase();
+        const parts = cleanedMsg.split(' ');
+
+        // Check for command
+        const command = parts[0];
+        const args = parts.slice(1);
+
+        if (this.commands[command]) {
+            return await this.commands[command](sender, args, landlordData);
+        }
+
+        // If no known command, provide help
+        return {
+            message: `Unrecognized command. Send *MENU* or *HELP* to see available landlord options.`
+        };
+    }
+
+    async showMenu(sender, args, landlordData) {
+        const menu = `
+🏠 *PropertyHub Kenya - Landlord Menu*
+
+Welcome ${landlordData.name}! Manage your properties and tenant flow via WhatsApp.
+
+📊 *STATUS* - View system stats and balances
+🏢 *ADD_PROPERTY* - Add a new property
+👥 *ADD_TENANT* - Register a new tenant
+🔖 *LOG_COMPLAINT* - Log a complaint for a tenant
+📂 *VIEW_COMPLAINTS* - View recent tenant complaints
+✅ *RESOLVE_COMPLAINT* - Mark a complaint resolved
+💰 *RECORD_PAYMENT* - Record a rent payment
+📈 *PAYMENT_HISTORY* - Check tenant payment history
+💵 *BALANCE* - Check tenant balance
+
+*Important:* If your WhatsApp balance is 0, the bot can still accept commands, but it cannot send payment receipts or tenant notifications on your behalf.
+
+*Examples:*
+ADD_PROPERTY Riverside Apartments, Westlands, Nairobi
+ADD_TENANT John Doe, +254712345678, A1
+LOG_COMPLAINT John Doe, water leak in kitchen
+RECORD_PAYMENT John Doe, 15000, January 2024
+VIEW_COMPLAINTS John Doe
+
+Send the command followed by details separated by commas.
+`.trim();
+        return { message: menu, type: 'menu' };
+    }
+
+    async buildReceiptMessage(payment, tenant, property, channel = 'whatsapp') {
+        const bold = channel === 'whatsapp' ? '*': '';
+        const lines = [];
+        lines.push(`${bold}PROPERTYHUB KENYA${bold}`);
+        lines.push(`${bold}PAYMENT RECEIPT${bold}`);
+        lines.push('------------------------------');
+        lines.push(`Receipt No: RCP-${payment.id.substr(0, 8).toUpperCase()}`);
+        lines.push(`Tenant: ${tenant.name}`);
+        lines.push(`Phone: ${tenant.phone || 'N/A'}`);
+        if (property) {
+            lines.push(`Property: ${property.name || property.address || 'N/A'}`);
+            if (property.unitNumber) lines.push(`Unit: ${property.unitNumber}`);
+        }
+        lines.push('------------------------------');
+        lines.push(`Amount: ${kenyaUtils.formatKES(payment.amount)}`);
+        lines.push(`Period: ${payment.period}`);
+        lines.push(`Paid: ${kenyaUtils.formatDate(payment.paid_at || payment.paidAt || new Date().toISOString())}`);
+        lines.push(`Status: Paid`);
+        lines.push('------------------------------');
+        lines.push('Thank you for your payment.');
+        lines.push('If you have questions, contact your landlord.');
+        return lines.join('\n');
+    }
+
+    async sendReceiptToTenant(landlordData, tenant, payment) {
+        const property = properties.find(p => p.id === tenant.property || tenant.assignedUnit?.propertyId);
+        const receiptTextWhatsApp = await this.buildReceiptMessage(payment, tenant, property, 'whatsapp');
+        const receiptTextSms = await this.buildReceiptMessage(payment, tenant, property, 'sms');
+        const whatsappBalance = Number(landlordData.whatsapp_balance || landlordData.whatsappBalance || 0);
+        const smsBalance = Number(landlordData.sms_balance || landlordData.smsBalance || 0);
+
+        if (whatsappBalance > 0) {
+            const whatsappResult = await whatsappProcessor.sendWhatsAppMessage(tenant.phone, receiptTextWhatsApp);
+            if (whatsappResult.success) {
+                return { success: true, channel: 'whatsapp' };
+            }
+            if (smsBalance > 0) {
+                await sendSMS(tenant.phone, receiptTextSms);
+                return { success: true, channel: 'sms', fallback: true };
+            }
+            return { success: false, reason: 'whatsapp_failed', error: whatsappResult.error };
+        }
+
+        if (smsBalance > 0) {
+            await sendSMS(tenant.phone, receiptTextSms);
+            return { success: true, channel: 'sms' };
+        }
+
+        return { success: false, reason: 'no_message_balance' };
+    }
+
+    async addProperty(sender, args, landlordData) {
+        if (args.length < 3) {
+            return { message: '🏢 To add a property, provide: name, address, type\n\n*Example:* ADD_PROPERTY Riverside Apartments, Westlands Nairobi, Residential' };
+        }
+
+        const propertyDetails = args.join(' ').split(',');
+        if (propertyDetails.length < 3) {
+            return { message: 'Please separate details with commas: name, address, type' };
+        }
+
+        const [name, address, type] = propertyDetails.map(s => s.trim());
+
+        const property = {
+            id: generateId(),
+            landlord_id: landlordData.id,
+            name: name,
+            address: address,
+            type: type || 'Residential',
+            status: 'active',
+            monthlyrent: 0,
+            taxrate: 0,
+            units: JSON.stringify([]),
+            recurringbills: JSON.stringify([]),
+            createdat: new Date().toISOString(),
+            updatedat: new Date().toISOString()
+        };
+
+        try {
+            await persistProperty(property);
+            properties.push(property);
+
+            return { message: `✅ Property "${name}" added successfully!\n\nProperty ID: ${property.id.substr(0, 8).toUpperCase()}\nAddress: ${address}\nType: ${type}\n\nYou can now add units and tenants to this property.` };
+        } catch (error) {
+            console.error('Error adding property:', error);
+            return { message: '❌ Failed to add property. Please try again.' };
+        }
+    }
+
+    async addTenant(sender, args, landlordData) {
+        if (args.length < 3) {
+            return { message: '👥 To add a tenant, provide: name, phone, unit\n\n*Example:* ADD_TENANT John Doe, +254712345678, A1' };
+        }
+
+        const tenantDetails = args.join(' ').split(',');
+        if (tenantDetails.length < 3) {
+            return { message: 'Please separate details with commas: name, phone, unit' };
+        }
+
+        const [name, phone, unit] = tenantDetails.map(s => s.trim());
+
+        const tenant = {
+            id: generateId(),
+            landlord_id: landlordData.id,
+            name: name,
+            phone: kenyaUtils.formatPhone(phone),
+            unit: unit,
+            property: '', // Will be set when assigned
+            rent: 0,
+            status: 'active',
+            method: 'mpesa',
+            due_date: new Date().toISOString(),
+            lease_end: null,
+            assigned_unit: null,
+            created_at: new Date().toISOString()
+        };
+
+        try {
+            await persistTenant(tenant);
+            tenants.push(tenant);
+
+            return { message: `✅ Tenant "${name}" added successfully!\n\nPhone: ${tenant.phone}\nUnit: ${unit}\n\nTenant can now receive WhatsApp notifications and make payments.` };
+        } catch (error) {
+            console.error('Error adding tenant:', error);
+            return { message: '❌ Failed to add tenant. Please try again.' };
+        }
+    }
+
+    async recordPayment(sender, args, landlordData) {
+        if (args.length < 3) {
+            return { message: '💰 To record payment, provide: tenant_name, amount, period\n\n*Example:* RECORD_PAYMENT John Doe, 15000, January 2024' };
+        }
+
+        const paymentDetails = args.join(' ').split(',');
+        if (paymentDetails.length < 3) {
+            return { message: 'Please separate details with commas: tenant_name, amount, period' };
+        }
+
+        const [tenantName, amountStr, period] = paymentDetails.map(s => s.trim());
+        const amount = parseInt(amountStr.replace(/[^\d]/g, ''));
+
+        if (!amount || amount <= 0) {
+            return { message: 'Invalid amount. Please provide a valid number.' };
+        }
+
+        // Find tenant by name (case insensitive)
+        const tenant = tenants.find(t =>
+            t.landlord_id === landlordData.id &&
+            t.name.toLowerCase().includes(tenantName.toLowerCase())
+        );
+
+        if (!tenant) {
+            return { message: `❌ Tenant "${tenantName}" not found. Please check the name and try again.` };
+        }
+
+        const payment = {
+            id: generateId(),
+            landlord_id: landlordData.id,
+            tenant_id: tenant.id,
+            tenant_name: tenant.name,
+            amount: amount,
+            period: period,
+            method: 'recorded',
+            reference: `WA-${Date.now()}`,
+            paid_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            status: 'paid',
+            due_date: tenant.due_date,
+            property_id: tenant.property
+        };
+
+        try {
+            await persistPayment(payment);
+            payments.push(payment);
+
+            const receiptResult = await this.sendReceiptToTenant(landlordData, tenant, payment);
+            let receiptMessage = 'A receipt has been sent to the tenant.';
+            if (!receiptResult.success) {
+                receiptMessage = 'Payment recorded, but the receipt could not be delivered because your WhatsApp and SMS balances are both empty. Please top up to notify the tenant.';
+            } else if (receiptResult.channel === 'sms') {
+                receiptMessage = 'Payment recorded successfully. Receipt was sent to the tenant via SMS because your WhatsApp balance is empty.';
+            }
+
+            return { message: `✅ Payment recorded successfully!\n\nTenant: ${tenant.name}\nAmount: ${kenyaUtils.formatKES(amount)}\nPeriod: ${period}\nReference: ${payment.reference}\n\n${receiptMessage}` };
+        } catch (error) {
+            console.error('Error recording payment:', error);
+            return { message: '❌ Failed to record payment. Please try again.' };
+        }
+    }
+
+    async getPaymentHistory(sender, args, landlordData) {
+        if (args.length < 1) {
+            return { message: '📈 To check payment history, provide tenant name\n\n*Example:* PAYMENT_HISTORY John Doe' };
+        }
+
+        const tenantName = args.join(' ').trim();
+
+        // Find tenant by name
+        const tenant = tenants.find(t =>
+            t.landlord_id === landlordData.id &&
+            t.name.toLowerCase().includes(tenantName.toLowerCase())
+        );
+
+        if (!tenant) {
+            return { message: `❌ Tenant "${tenantName}" not found. Please check the name and try again.` };
+        }
+
+        const tenantPayments = payments.filter(p => p.tenant_id === tenant.id);
+        const paidPayments = tenantPayments.filter(p => p.status === 'paid');
+        const pendingPayments = tenantPayments.filter(p => p.status === 'pending' || p.status === 'overdue');
+
+        let response = `📊 *Payment History for ${tenant.name}*\n\n`;
+
+        if (paidPayments.length > 0) {
+            response += `✅ *Paid Payments:*\n`;
+            paidPayments.slice(-5).forEach(p => {
+                response += `• ${kenyaUtils.formatKES(p.amount)} - ${p.period} (${kenyaUtils.formatDate(p.paid_at)})\n`;
+            });
+            response += `\n`;
+        }
+
+        if (pendingPayments.length > 0) {
+            response += `⏳ *Pending Payments:*\n`;
+            pendingPayments.forEach(p => {
+                response += `• ${kenyaUtils.formatKES(p.amount)} - ${p.period} (Due: ${kenyaUtils.formatDate(p.due_date)})\n`;
+            });
+            response += `\n`;
+        }
+
+        const totalPaid = paidPayments.reduce((sum, p) => sum + p.amount, 0);
+        const totalPending = pendingPayments.reduce((sum, p) => sum + p.amount, 0);
+
+        response += `💰 *Summary:*\n`;
+        response += `Total Paid: ${kenyaUtils.formatKES(totalPaid)}\n`;
+        response += `Total Pending: ${kenyaUtils.formatKES(totalPending)}\n`;
+        response += `Payment Method: ${tenant.method}`;
+
+        return { message: response };
+    }
+
+    async checkTenantBalance(sender, args, landlordData) {
+        if (args.length < 1) {
+            return { message: '💵 To check tenant balance, provide tenant name\n\n*Example:* BALANCE John Doe' };
+        }
+
+        const tenantName = args.join(' ').trim();
+
+        // Find tenant by name
+        const tenant = tenants.find(t =>
+            t.landlord_id === landlordData.id &&
+            t.name.toLowerCase().includes(tenantName.toLowerCase())
+        );
+
+        if (!tenant) {
+            return { message: `❌ Tenant "${tenantName}" not found. Please check the name and try again.` };
+        }
+
+        const tenantPayments = payments.filter(p => p.tenant_id === tenant.id);
+        const totalDue = tenantPayments.reduce((sum, p) => {
+            if (p.status === 'pending' || p.status === 'overdue') return sum + p.amount;
+            return sum;
+        }, 0);
+        const totalPaid = tenantPayments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0);
+
+        let response = `💰 *Balance for ${tenant.name}*\n\n`;
+        response += `Total Paid: ${kenyaUtils.formatKES(totalPaid)}\n`;
+        response += `Current Balance Due: ${kenyaUtils.formatKES(totalDue)}\n`;
+        response += `Last Payment: ${tenantPayments.filter(p => p.status === 'paid').length > 0 ? kenyaUtils.formatDate(tenantPayments.filter(p => p.status === 'paid').sort((a, b) => new Date(b.paid_at) - new Date(a.paid_at))[0].paid_at) : 'None'}\n\n`;
+
+        if (totalDue > 0) {
+            response += `📞 Send payment reminder to tenant? Reply with REMIND ${tenant.name}`;
+        } else {
+            response += `✅ Account is up to date!`;
+        }
+
+        return { message: response };
+    }
+
+    async getSystemStatus(sender, args, landlordData) {
+        const landlordProperties = properties.filter(p => p.landlord_id === landlordData.id);
+        const landlordTenants = tenants.filter(t => t.landlord_id === landlordData.id);
+        const landlordPayments = payments.filter(p => p.landlord_id === landlordData.id);
+
+        const totalRevenue = landlordPayments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0);
+        const pendingRevenue = landlordPayments.filter(p => p.status === 'pending').reduce((sum, p) => sum + p.amount, 0);
+        const overdueCount = landlordPayments.filter(p => p.status === 'overdue' || (p.status === 'pending' && new Date(p.due_date) < new Date())).length;
+
+        let response = `📊 *System Status for ${landlordData.name}*\n\n`;
+        response += `🏢 Properties: ${landlordProperties.length}\n`;
+        response += `👥 Tenants: ${landlordTenants.length}\n`;
+        response += `💰 Total Revenue: ${kenyaUtils.formatKES(totalRevenue)}\n`;
+        response += `⏳ Pending Revenue: ${kenyaUtils.formatKES(pendingRevenue)}\n`;
+        response += `⚠️ Overdue Payments: ${overdueCount}\n\n`;
+
+        response += `💳 *Billing Status:*\n`;
+        response += `Wallet Balance: ${kenyaUtils.formatKES(landlordData.wallet_balance || 0)}\n`;
+        response += `WhatsApp Balance: ${landlordData.whatsapp_balance || 0} messages\n`;
+        response += `SMS Balance: ${landlordData.sms_balance || 0} messages\n`;
+        response += `Current Plan: ${landlordData.current_plan || 'Free'}\n\n`;
+
+        response += `📱 WhatsApp Integration: ${metaClient ? '✅ Active' : '⚠️ Simulated'}`;
+
+        return { message: response };
+    }
+
+    async logComplaint(sender, args, landlordData) {
+        if (args.length < 2) {
+            return { message: '📝 To log a complaint, provide tenant name and complaint details.\n\nExample: LOG_COMPLAINT John Doe, water leak in kitchen' };
+        }
+
+        const [tenantName, ...complaintParts] = args.join(' ').split(',');
+        const description = complaintParts.join(',').trim();
+
+        if (!description) {
+            return { message: 'Please include details of the complaint after the tenant name.' };
+        }
+
+        const tenant = tenants.find(t =>
+            t.landlord_id === landlordData.id &&
+            t.name.toLowerCase().includes(tenantName.trim().toLowerCase())
+        );
+
+        if (!tenant) {
+            return { message: `❌ Tenant "${tenantName.trim()}" not found. Use the exact tenant name.` };
+        }
+
+        const complaint = {
+            id: generateId(),
+            tenantId: tenant.id,
+            tenantName: tenant.name,
+            unit: tenant.unit || 'N/A',
+            property: tenant.property || 'N/A',
+            category: 'General',
+            description: description,
+            priority: 'medium',
+            status: 'pending',
+            source: 'landlord',
+            createdAt: new Date().toISOString()
+        };
+
+        complaints.push(complaint);
+        persistComplaint(complaint);
+
+        return { message: `✅ Complaint logged for ${tenant.name}.\nReference: #${complaint.id.slice(-6).toUpperCase()}\nStatus: pending` };
+    }
+
+    async viewComplaints(sender, args, landlordData) {
+        const tenantName = args.join(' ').trim();
+        let filtered = complaints.filter(c => c.tenantId && tenants.some(t => t.id === c.tenantId && t.landlord_id === landlordData.id));
+
+        if (tenantName) {
+            filtered = filtered.filter(c => c.tenantName.toLowerCase().includes(tenantName.toLowerCase()));
+        }
+
+        if (filtered.length === 0) {
+            return { message: tenantName
+                ? `No complaints found for tenant "${tenantName}".`
+                : 'No complaints found for your tenants.'
+            };
+        }
+
+        const topComplaints = filtered.slice(-5).reverse();
+        let response = `📋 *Recent Complaints*\n\n`;
+        topComplaints.forEach((c) => {
+            response += `• ${c.tenantName}: ${c.description.slice(0, 60)}...\n  Status: ${c.status}\n  Ref: ${c.id.slice(-6).toUpperCase()}\n\n`;
+        });
+
+        response += 'Use RESOLVE_COMPLAINT <reference> to mark a complaint resolved.';
+        return { message: response };
+    }
+
+    async resolveComplaint(sender, args, landlordData) {
+        if (args.length < 1) {
+            return { message: '✅ To resolve a complaint, provide the complaint reference.\n\nExample: RESOLVE_COMPLAINT ABC123' };
+        }
+
+        const reference = args.join(' ').trim().toUpperCase();
+        const complaint = complaints.find(c => c.id.slice(-6).toUpperCase() === reference && tenants.some(t => t.id === c.tenantId && t.landlord_id === landlordData.id));
+
+        if (!complaint) {
+            return { message: `❌ Complaint reference "${reference}" not found.` };
+        }
+
+        complaint.status = 'resolved';
+        await query('UPDATE complaints SET status = $1 WHERE id = $2', ['resolved', complaint.id]);
+
+        const tenant = tenants.find(t => t.id === complaint.tenantId);
+        if (tenant && tenant.phone) {
+            const message = `✅ Your complaint has been resolved.\nReference: #${complaint.id.slice(-6).toUpperCase()}\nDescription: ${complaint.description}\nStatus: resolved.`;
+            whatsappProcessor.sendWhatsAppMessage(tenant.phone, message).catch(err => console.error('Failed to send resolution message:', err));
+        }
+
+        return { message: `✅ Complaint ${reference} marked as resolved.` };
+    }
+}
+
 function normalizePhoneForSearch(phone) {
   if (!phone) return '';
   const formatted = kenyaUtils.formatPhone(phone);
@@ -1253,6 +1806,22 @@ async function findTenantByPhone(phone) {
   }
 }
 
+async function findLandlordByPhone(phone) {
+  const normalized = normalizePhoneForSearch(phone);
+
+  // Query database for landlord with this phone number
+  try {
+    const result = await queryOne(
+      `SELECT * FROM landlords WHERE replace(replace(phone,' ',''),'+','') = $1`,
+      [normalized.replace(/[\s+]/g, '')]
+    );
+    return result || null;
+  } catch (error) {
+    console.error('Error finding landlord by phone:', error);
+    return null;
+  }
+}
+
 function getPaymentsByTenant(tenantId) {
   return db.prepare('SELECT * FROM payments WHERE tenant_id = ?').all(tenantId);
 }
@@ -1269,6 +1838,7 @@ function saveComplaint(complaint) {
 }
 
 const whatsappProcessor = new WhatsAppCommandProcessor();
+const landlordWhatsappProcessor = new LandlordWhatsAppCommandProcessor();
 
 // ==================== PROPERTY ROUTES ====================
 
@@ -1472,7 +2042,7 @@ app.post('/api/payments', (req, res) => {
     res.status(201).json(payment);
 });
 
-app.put('/api/payments/:id/status', (req, res) => {
+app.put('/api/payments/:id/status', async (req, res) => {
     const payment = payments.find(p => p.id === req.params.id);
     if (!payment) return res.status(404).json({ error: 'Payment not found' });
 
@@ -1482,12 +2052,12 @@ app.put('/api/payments/:id/status', (req, res) => {
     if (req.body.status === 'paid') {
         payment.paidAt = new Date().toISOString();
 
-        // Send receipt via WhatsApp if tenant has phone
         const tenant = tenants.find(t => t.id === payment.tenantId);
         if (tenant && tenant.phone) {
-            whatsappProcessor.sendWhatsAppMessage(tenant.phone,
-`✅ *Payment Confirmed!*\n\nAmount: ${kenyaUtils.formatKES(payment.amount)}\nPeriod: ${payment.period}\nDate: ${kenyaUtils.formatDate(payment.paidAt)}\n\nThank you for your payment!`
-            );
+            const sendResult = await sendTenantReceipt(payment.landlord_id, tenant, payment);
+            if (!sendResult.success) {
+                console.log(`⚠️ Cannot send receipt for payment ${payment.id}: ${sendResult.error || 'no balance'}`);
+            }
         }
     }
 
@@ -1712,6 +2282,11 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
                         const messageId = message.id;
 
                         const tenant = await findTenantByPhone(from);
+                        const landlord = await findLandlordByPhone(from);
+
+                        // Determine if this is a landlord or tenant message
+                        const isLandlord = !!landlord;
+                        const isTenant = !!tenant;
 
                         // Save inbound message
                         const inboundId = generateId();
@@ -1721,11 +2296,11 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
                           [inboundId, tenant?.id || from, rawText, new Date().toISOString(), messageId, from]
                         );
 
-                        // Detect if this is a complaint or maintenance request
-                        const isComplaint = text.includes('COMPLAIN') || text.includes('ISSUE') || text.includes('PROBLEM');
-                        const isMaintenance = text.includes('MAINTENANCE') || text.includes('MAINTAIN') || text.includes('FIX') || text.includes('REPAIR');
+                        // Detect if this is a complaint or maintenance request (tenant only)
+                        const isComplaint = !isLandlord && (text.includes('COMPLAIN') || text.includes('ISSUE') || text.includes('PROBLEM'));
+                        const isMaintenance = !isLandlord && (text.includes('MAINTENANCE') || text.includes('MAINTAIN') || text.includes('FIX') || text.includes('REPAIR'));
                         
-                        if (isComplaint || isMaintenance) {
+                        if (isTenant && (isComplaint || isMaintenance)) {
                           // Save as complaint/maintenance record for landlord to address
                           const complaintId = generateId();
                           const category = isMaintenance ? 'Maintenance' : 'General';
@@ -1768,8 +2343,17 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
                             [outboundId, tenant?.id || from, ackMessage, new Date().toISOString(), metaPhoneNumberId, from]
                           );
                         } else {
-                          // Process as command for demo
-                          const response = await whatsappProcessor.process(from, text || 'MENU', tenant);
+                          // Process as command - route to appropriate processor
+                          let response;
+                          if (isLandlord) {
+                            response = await landlordWhatsappProcessor.process(from, text || 'MENU', landlord);
+                          } else if (isTenant) {
+                            response = await whatsappProcessor.process(from, text || 'MENU', tenant);
+                          } else {
+                            // Unknown sender - assume tenant and show menu
+                            response = await whatsappProcessor.process(from, 'MENU', null);
+                          }
+
                           if (response.message) {
                             await whatsappProcessor.sendWhatsAppMessage(from, response.message);
                             
@@ -1777,18 +2361,19 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
                             await query(
                               `INSERT INTO wa_messages (id, tenant_id, direction, body, timestamp, channel)
                                VALUES ($1, $2, 'out', $3, $4, 'bot')`,
-                              [outboundId, tenant?.id || from, response.message, new Date().toISOString()]
+                              [outboundId, tenant?.id || landlord?.id || from, response.message, new Date().toISOString()]
                             );
                           }
                         }
 
                         // Push notification for landlord dashboard
-                        if (isComplaint || isMaintenance) {
+                        if (isTenant && (isComplaint || isMaintenance)) {
                           await query(
-                            `INSERT INTO notifications (id, type, title, body, created_at, read)
-                             VALUES ($1, $2, $3, $4, $5, false)`,
+                            `INSERT INTO notifications (id, landlord_id, type, title, body, created_at, read)
+                             VALUES ($1, $2, $3, $4, $5, $6, false)`,
                             [
                               generateId(),
+                              tenant?.landlord_id || 'unknown',
                               isMaintenance ? 'maintenance' : 'complaint',
                               `${tenant?.name || from} - ${isMaintenance ? 'Maintenance' : 'Complaint'}`,
                               `${rawText.slice(0, 80)}`,
@@ -2068,11 +2653,13 @@ app.get('/api/whatsapp/messages/:phone', (req, res) => {
 
 // ==================== NOTIFICATION ROUTES ====================
 
-app.post('/api/notifications', async (req, res) => {
+app.post('/api/notifications', authenticateToken, async (req, res) => {
     const { recipient, message, type = 'whatsapp' } = req.body;
+    const landlordId = req.landlord.id;
 
     const notification = {
         id: generateId(),
+        landlord_id: landlordId,
         recipient,
         message,
         type,
@@ -2087,24 +2674,25 @@ app.post('/api/notifications', async (req, res) => {
     notifications.push(notification);
     persistNotification(notification);
 
-    // Send via WhatsApp if type is whatsapp
     if (type === 'whatsapp' && metaClient) {
         const result = await whatsappProcessor.sendWhatsAppMessage(recipient, message);
         notification.status = result.success ? 'sent' : 'failed';
     } else {
-        notification.status = 'sent'; // Simulated
+        notification.status = 'sent';
     }
 
     res.status(201).json(notification);
 });
 
-app.post('/api/notifications/bulk', async (req, res) => {
+app.post('/api/notifications/bulk', authenticateToken, async (req, res) => {
     const { recipients, message, type = 'whatsapp' } = req.body;
+    const landlordId = req.landlord.id;
     const sentNotifications = [];
 
     for (const recipient of recipients) {
         const notification = {
             id: generateId(),
+            landlord_id: landlordId,
             recipient,
             message,
             type,
@@ -2131,8 +2719,15 @@ app.post('/api/notifications/bulk', async (req, res) => {
     res.status(201).json({ sent: sentNotifications.length, notifications: sentNotifications });
 });
 
-app.get('/api/notifications', (req, res) => {
-    res.json(notifications);
+app.get('/api/notifications', authenticateToken, async (req, res) => {
+    try {
+        const landlordId = req.landlord.id;
+        const rows = await queryAll('SELECT * FROM notifications WHERE landlord_id = $1 ORDER BY created_at DESC', [landlordId]);
+        res.json(rows.map(normalizeNotificationRow));
+    } catch (error) {
+        console.error('Error fetching notifications:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 app.get('/api/sync/properties', authenticateToken, async (req, res) => {
@@ -2182,9 +2777,10 @@ app.get('/api/sync/complaints', authenticateToken, async (req, res) => {
     }
 });
 
-app.get('/api/sync/notifications', async (req, res) => {
+app.get('/api/sync/notifications', authenticateToken, async (req, res) => {
     try {
-        const rows = await queryAll('SELECT * FROM notifications ORDER BY created_at DESC');
+        const landlordId = req.landlord.id;
+        const rows = await queryAll('SELECT * FROM notifications WHERE landlord_id = $1 ORDER BY created_at DESC', [landlordId]);
         res.json(rows.map(normalizeNotificationRow));
     } catch (error) {
         console.error('Error fetching notifications:', error);
@@ -2192,9 +2788,10 @@ app.get('/api/sync/notifications', async (req, res) => {
     }
 });
 
-app.get('/api/sync/whatsapp', async (req, res) => {
+app.get('/api/sync/whatsapp', authenticateToken, async (req, res) => {
     try {
-        const rows = await queryAll('SELECT * FROM wa_messages');
+        const landlordId = req.landlord.id;
+        const rows = await queryAll('SELECT * FROM wa_messages WHERE landlord_id = $1 ORDER BY timestamp ASC', [landlordId]);
         res.json(rows.map(normalizeWaMessageRow));
     } catch (error) {
         console.error('Error fetching wa messages:', error);
@@ -2296,13 +2893,18 @@ app.post('/api/auth/register', async (req, res) => {
         const saltRounds = 10;
         const passwordHash = await bcrypt.hash(password, saltRounds);
 
+        const phoneValue = phone ? kenyaUtils.formatPhone(phone) : '';
+        if (phone && !kenyaUtils.isValidKenyanPhone(phone)) {
+            return res.status(400).json({ error: 'Invalid Kenyan phone number' });
+        }
+
         // Create landlord
         const landlordId = generateId();
         const landlord = {
             id: landlordId,
             name,
             email,
-            phone: phone || '',
+            phone: phoneValue,
             company: company || '',
             city: city || 'Nairobi',
             preferredChannel: preferredChannel || 'whatsapp',
@@ -2330,26 +2932,6 @@ app.post('/api/auth/register', async (req, res) => {
             ]
         );
 
-        // Send SMS notification to admin about new registration
-        console.log(`📱 Processing registration notification for user ${landlord.name}, phone: "${landlord.phone}"`);
-        if (landlord.phone && landlord.phone.trim() !== '') {
-            const adminPhone = '+254768038725';
-            const notificationMessage = `PropertyHub Kenya: New user "${landlord.name}" has registered and verified their phone (${landlord.phone}). Email: ${landlord.email}`;
-            console.log(`📤 Attempting to send registration notification SMS to ${adminPhone}`);
-            try {
-                const smsResult = await sendSMS(adminPhone, notificationMessage);
-                if (smsResult.success) {
-                    console.log(`✅ Registration notification SMS sent successfully to ${adminPhone}`);
-                } else {
-                    console.error('❌ Registration notification SMS failed:', smsResult.error);
-                }
-            } catch (smsError) {
-                console.error('❌ Failed to send registration notification SMS:', smsError);
-            }
-        } else {
-            console.log(`⚠️ Skipping registration notification SMS - no phone number provided`);
-        }
-
         // Generate token
         const token = generateToken(landlord);
 
@@ -2366,6 +2948,25 @@ app.post('/api/auth/register', async (req, res) => {
             },
             token
         });
+
+        if (phoneValue) {
+            const adminPhone = '+254768038725';
+            const notificationMessage = `PropertyHub Kenya: New user "${landlord.name}" has registered and verified their phone (${landlord.phone}). Email: ${landlord.email}`;
+            console.log(`📤 Scheduling registration notification SMS to ${adminPhone}`);
+            sendSMS(adminPhone, notificationMessage)
+                .then(result => {
+                    if (result.success) {
+                        console.log(`✅ Registration notification SMS sent successfully to ${adminPhone}`);
+                    } else {
+                        console.error('❌ Registration notification SMS failed:', result.error);
+                    }
+                })
+                .catch((smsError) => {
+                    console.error('❌ Failed to send registration notification SMS:', smsError);
+                });
+        } else {
+            console.log(`⚠️ Skipping registration notification SMS - no phone number provided`);
+        }
 
     } catch (error) {
         console.error('Registration error:', error);
@@ -2543,7 +3144,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
 app.get('/api/auth/me', authenticateToken, async (req, res) => {
     try {
         const landlord = await queryOne(
-            'SELECT id, name, email, phone, company, city, preferred_channel, collection_month_start FROM landlords WHERE id = $1',
+            'SELECT id, name, email, phone, company, city, preferred_channel, collection_month_start, wallet_balance, whatsapp_balance, sms_balance, current_plan, last_top_up FROM landlords WHERE id = $1',
             [req.landlord.id]
         );
 
@@ -2559,7 +3160,14 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
             company: landlord.company,
             city: landlord.city,
             preferredChannel: landlord.preferred_channel,
-            collectionMonthStart: landlord.collection_month_start
+            collectionMonthStart: landlord.collection_month_start,
+            billing: {
+                walletBalance: landlord.wallet_balance ?? 0,
+                whatsappBalance: landlord.whatsapp_balance ?? 0,
+                smsBalance: landlord.sms_balance ?? 0,
+                currentPlan: landlord.current_plan || undefined,
+                lastTopUp: landlord.last_top_up || undefined
+            }
         });
 
     } catch (error) {
@@ -2571,12 +3179,30 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
 // Update landlord profile
 app.put('/api/auth/me', authenticateToken, async (req, res) => {
     try {
-        const { name, phone, company, city, preferredChannel, collectionMonthStart } = req.body;
+        const { name, phone, company, city, preferredChannel, collectionMonthStart, billing = {} } = req.body;
+        const {
+            walletBalance = 0,
+            whatsappBalance = 0,
+            smsBalance = 0,
+            currentPlan = null,
+            lastTopUp = null
+        } = billing;
 
         await query(
             `UPDATE landlords
-             SET name = $1, phone = $2, company = $3, city = $4, preferred_channel = $5, collection_month_start = $6, updated_at = $7
-             WHERE id = $8`,
+             SET name = $1,
+                 phone = $2,
+                 company = $3,
+                 city = $4,
+                 preferred_channel = $5,
+                 collection_month_start = $6,
+                 wallet_balance = $7,
+                 whatsapp_balance = $8,
+                 sms_balance = $9,
+                 current_plan = $10,
+                 last_top_up = $11,
+                 updated_at = $12
+             WHERE id = $13`,
             [
                 name,
                 phone || '',
@@ -2584,13 +3210,18 @@ app.put('/api/auth/me', authenticateToken, async (req, res) => {
                 city || '',
                 preferredChannel || 'whatsapp',
                 collectionMonthStart || 1,
+                walletBalance,
+                whatsappBalance,
+                smsBalance,
+                currentPlan,
+                lastTopUp,
                 new Date().toISOString(),
                 req.landlord.id
             ]
         );
 
         const updatedLandlord = await queryOne(
-            'SELECT id, name, email, phone, company, city, preferred_channel, collection_month_start FROM landlords WHERE id = $1',
+            'SELECT id, name, email, phone, company, city, preferred_channel, collection_month_start, wallet_balance, whatsapp_balance, sms_balance, current_plan, last_top_up FROM landlords WHERE id = $1',
             [req.landlord.id]
         );
 
@@ -2602,7 +3233,14 @@ app.put('/api/auth/me', authenticateToken, async (req, res) => {
             company: updatedLandlord.company,
             city: updatedLandlord.city,
             preferredChannel: updatedLandlord.preferred_channel,
-            collectionMonthStart: updatedLandlord.collection_month_start
+            collectionMonthStart: updatedLandlord.collection_month_start,
+            billing: {
+                walletBalance: updatedLandlord.wallet_balance ?? 0,
+                whatsappBalance: updatedLandlord.whatsapp_balance ?? 0,
+                smsBalance: updatedLandlord.sms_balance ?? 0,
+                currentPlan: updatedLandlord.current_plan || undefined,
+                lastTopUp: updatedLandlord.last_top_up || undefined
+            }
         });
 
     } catch (error) {
@@ -2775,11 +3413,8 @@ app.post('/api/sync/payments', authenticateToken, async (req, res) => {
             ).then(rows => rows.reduce((sum, pay) => sum + Number(pay.amount), 0));
 
             const overpayment = Math.max(0, totalPaid - Number(tenant.rent));
-            const receiptMsg = `✅ *Payment Confirmed!*\n\nAmount: ${kenyaUtils.formatKES(Number(p.amount))}\nPeriod: ${p.period}\nDate: ${kenyaUtils.formatDate(p.paidAt || new Date().toISOString())}${overpayment > 0 ? `\n💰 Overpayment: ${kenyaUtils.formatKES(overpayment)} (credited to next period)` : ''}\n\nThank you for your payment!`;
-
-            whatsappProcessor.sendWhatsAppMessage(tenant.phone, receiptMsg).then(result => {
-                console.log(`[SYNC] Receipt sent to ${tenant.name}: ${result.success ? 'ok' : result.error}`);
-            }).catch(err => console.error('WhatsApp receipt error:', err));
+            const sendResult = await sendTenantReceipt(landlordId, tenant, p);
+            console.log(`[SYNC] Receipt send result for ${tenant.name}: ${sendResult.success ? 'ok' : sendResult.error || 'no balance'}`);
         }
 
         res.json({ ok: true });
@@ -2941,10 +3576,8 @@ app.post('/api/sync/payments', async (req, res) => {
         const tenantResult = await queryOne('SELECT * FROM tenants WHERE id = $1', [p.tenantId]);
         const tenant = tenantResult ? normalizeTenantRow(tenantResult) : null;
         if (tenant && tenant.phone) {
-            const receiptMsg = `✅ *Payment Confirmed!*\n\nAmount: ${kenyaUtils.formatKES(Number(p.amount))}\nPeriod: ${p.period}\nDate: ${kenyaUtils.formatDate(p.paidAt || new Date().toISOString())}\n\nThank you for your payment!`;
-            whatsappProcessor.sendWhatsAppMessage(tenant.phone, receiptMsg).then(result => {
-                console.log(`[SYNC] Receipt sent to ${tenant.name}: ${result.success ? 'ok' : result.error}`);
-            }).catch(err => console.error('WhatsApp receipt error:', err));
+            const sendResult = await sendTenantReceipt(p.landlordId, tenant, p);
+            console.log(`[SYNC] Receipt send result for ${tenant.name}: ${sendResult.success ? 'ok' : sendResult.error || 'no balance'}`);
         }
 
     res.json({ ok: true });

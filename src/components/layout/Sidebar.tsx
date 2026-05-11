@@ -9,7 +9,8 @@ const nav = [
   { to: "/tenants", icon: Users, label: "Tenants" },
   { to: "/collections", icon: Receipt, label: "Collections" },
   { to: "/maintenance", icon: Wrench, label: "Maintenance" },
-  { to: "/messages", icon: MessageCircle, label: "WhatsApp" },
+  // Temporarily hiding WhatsApp page for this version
+  // { to: "/messages", icon: MessageCircle, label: "WhatsApp" },
   { to: "/reports", icon: FileBarChart, label: "Reports" },
 ];
 

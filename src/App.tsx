@@ -68,7 +68,8 @@ const AppRoutes = () => {
         <Route path="/tenants" element={<Tenants />} />
         <Route path="/collections" element={<Collections />} />
         <Route path="/maintenance" element={<Maintenance />} />
-        <Route path="/messages" element={<Messages />} />
+        // Temporarily hiding WhatsApp page for this version
+        // <Route path="/messages" element={<Messages />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/pricing" element={<Pricing />} />
