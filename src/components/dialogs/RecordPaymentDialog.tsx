@@ -51,7 +51,7 @@ export const RecordPaymentDialog = ({
   return (
     <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (v) setForm(initial()); }}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <div className="size-10 rounded-xl gradient-primary text-primary-foreground flex items-center justify-center mb-2">
             <Receipt className="size-5" />

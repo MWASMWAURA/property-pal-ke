@@ -29,7 +29,7 @@ export const AddPropertyDialog = ({ trigger }: { trigger: React.ReactNode }) => 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <div className="size-10 rounded-xl gradient-primary text-primary-foreground flex items-center justify-center mb-2">
             <Building2 className="size-5"/>

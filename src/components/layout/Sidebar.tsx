@@ -11,7 +11,6 @@ const nav = [
   { to: "/maintenance", icon: Wrench, label: "Maintenance" },
   { to: "/messages", icon: MessageCircle, label: "WhatsApp" },
   { to: "/reports", icon: FileBarChart, label: "Reports" },
-  { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
 export const Sidebar = () => {
@@ -80,7 +79,7 @@ export const MobileNav = () => {
   ];
   
   return (
-    <nav className="lg:hidden fixed bottom-0 inset-x-0 bg-sidebar text-sidebar-foreground border-t border-sidebar-border z-40 px-2 py-2 overflow-x-auto">
+    <nav className="lg:hidden fixed bottom-0 inset-x-0 bg-sidebar text-sidebar-foreground border-t border-sidebar-border z-40 px-2 py-2 overflow-x-auto scrollbar-hide">
       <div className="flex justify-start min-w-max gap-1">
         {mobileNav.map(({ to, icon: Icon, label }) => (
           <NavLink
@@ -89,12 +88,12 @@ export const MobileNav = () => {
             end={to === "/"}
             data-tour={to === "/properties" ? "nav-properties" : to === "/tenants" ? "nav-tenants" : undefined}
             className={({ isActive }) =>
-              cn("flex flex-col items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-medium whitespace-nowrap min-w-[60px]",
-                isActive ? "text-sidebar-primary" : "text-sidebar-foreground/70")
+              cn("flex flex-col items-center gap-1 px-2 py-2 rounded-lg text-[10px] font-medium whitespace-nowrap min-w-[50px] max-w-[70px] touch-manipulation",
+                isActive ? "text-sidebar-primary bg-sidebar-accent/20" : "text-sidebar-foreground/70 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent/10")
             }
           >
-            <Icon className="size-5" />
-            {label}
+            <Icon className="size-4" />
+            <span className="truncate w-full text-center">{label}</span>
           </NavLink>
         ))}
       </div>

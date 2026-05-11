@@ -44,7 +44,7 @@ export const RecordComplaintDialog = ({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <div className="size-10 rounded-xl bg-warning/15 text-warning flex items-center justify-center mb-2">
             <MessageSquareWarning className="size-5" />

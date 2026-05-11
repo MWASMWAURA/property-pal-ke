@@ -55,7 +55,7 @@ const Dashboard = () => {
           label="Overdue"
           value={formatKsh(overdueAmount)}
           sub={`${overdueTenants.length} tenants behind`}
-          action={<Button size="sm" variant="secondary" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur"><MessageCircle className="size-3.5"/> Chase via WhatsApp</Button>}
+          action={<Button size="sm" variant="secondary" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur touch-manipulation min-h-[44px] px-3 sm:px-4"><MessageCircle className="size-4 sm:size-3.5"/> <span className="hidden xs:inline">Chase via WhatsApp</span><span className="xs:hidden">Chase</span></Button>}
         />
         <KpiCard
           icon={<Home className="size-5" />}
