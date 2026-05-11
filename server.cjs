@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors({
-  origin: ['property.mwasmwaura.co.ke','https://property-pal-ke.onrender.com', 'http://localhost:5173', 'http://localhost:5174'],
+  origin: ['https://property.mwasmwaura.co.ke','https://property-pal-ke.onrender.com', 'http://localhost:5173', 'http://localhost:5174'],
   credentials: true
 }));
 app.use(bodyParser.json());
