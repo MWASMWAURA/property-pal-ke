@@ -1107,7 +1107,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         const dateB = new Date(`${monthB} 1, ${yearB}`);
         return dateA.getTime() - dateB.getTime();
       });
-  }, [payments, profile?.collectionMonthStart]);
+  }, [payments, profile?.collectionMonthStart, tenants]);
 
   const value = useMemo<Ctx>(() => {
     const isDemo = mode === "demo";

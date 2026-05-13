@@ -3510,7 +3510,7 @@ app.post('/api/sync/tenants', authenticateToken, async (req, res) => {
               lease_end = EXCLUDED.lease_end,
               assigned_unit = EXCLUDED.assigned_unit,
               created_at = EXCLUDED.created_at
-              WHERE tenants.landlord_id = $2`,
+              WHERE tenants.landlord_id = $14`,
             [
                 t.id,
                 landlordId,
