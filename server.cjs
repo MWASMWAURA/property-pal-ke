@@ -3049,6 +3049,13 @@ app.post('/api/auth/forgot-password', async (req, res) => {
             });
         }
 
+        // Check rate limit: max 2 reset emails per day per email
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const recentRequests = await queryAll('SELECT id FROM password_reset_tokens WHERE email = $1 AND created_at > $2', [email, oneDayAgo]);
+        if (recentRequests.length >= 2) {
+            return res.status(429).json({ error: 'Too many password reset requests. Please try again in 24 hours.' });
+        }
+
         // Generate reset token
         const resetToken = generateId();
         const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour

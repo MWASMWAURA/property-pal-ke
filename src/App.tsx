@@ -30,6 +30,7 @@ const queryClient = new QueryClient();
 const AppRoutes = () => {
   const { isAuthenticated, isLoading, logout, profile } = useData();
   const isStandalone = useStandaloneMode();
+  const location = useLocation();
 
   if (location.pathname === '/reset-password') {
     return <ResetPassword />;
