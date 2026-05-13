@@ -26,12 +26,12 @@ async function migrate() {
                         address TEXT,
                         type TEXT,
                         status TEXT,
-                        monthlyrent INTEGER,
-                        taxrate INTEGER,
+                        monthly_rent INTEGER,
+                        tax_rate INTEGER,
                         units TEXT,
-                        recurringbills TEXT,
-                        createdat TEXT,
-                        updatedat TEXT
+                        recurring_bills TEXT,
+                        created_at TEXT,
+                        updated_at TEXT
                     );
                 `);
 
@@ -110,7 +110,7 @@ async function migrate() {
                         read BOOLEAN DEFAULT false,
                         recipient TEXT,
                         message TEXT,
-                        sentat TEXT,
+                        sent_at TEXT,
                         status TEXT
                     );
                 `);
@@ -132,12 +132,12 @@ async function migrate() {
                         address TEXT,
                         type TEXT,
                         status TEXT,
-                        monthlyrent INTEGER,
-                        taxrate INTEGER,
+                        monthly_rent INTEGER,
+                        tax_rate INTEGER,
                         units TEXT,
-                        recurringbills TEXT,
-                        createdat TEXT,
-                        updatedat TEXT
+                        recurring_bills TEXT,
+                        created_at TEXT,
+                        updated_at TEXT
                     );
 
                     CREATE TABLE IF NOT EXISTS tenants (
@@ -206,7 +206,7 @@ async function migrate() {
                         read INTEGER DEFAULT 0,
                         recipient TEXT,
                         message TEXT,
-                        sentat TEXT,
+                        sent_at TEXT,
                         status TEXT
                     );
                 `);
@@ -228,12 +228,12 @@ async function migrate() {
                     address TEXT,
                     type TEXT,
                     status TEXT,
-                    monthlyrent INTEGER,
-                    taxrate INTEGER,
+                    monthly_rent INTEGER,
+                    tax_rate INTEGER,
                     units TEXT,
-                    recurringbills TEXT,
-                    createdat TEXT,
-                    updatedat TEXT
+                    recurring_bills TEXT,
+                    created_at TEXT,
+                    updated_at TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS tenants (
@@ -302,7 +302,7 @@ async function migrate() {
                     read INTEGER DEFAULT 0,
                     recipient TEXT,
                     message TEXT,
-                    sentat TEXT,
+                    sent_at TEXT,
                     status TEXT
                 );
             `);

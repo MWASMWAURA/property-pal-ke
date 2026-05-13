@@ -3362,7 +3362,7 @@ app.post('/api/sync/payments', authenticateToken, async (req, res) => {
               paid_at = EXCLUDED.paid_at,
               created_at = EXCLUDED.created_at,
               status = EXCLUDED.status
-              WHERE complaints.landlord_id = $2`,
+              WHERE payments.landlord_id = $2`,
             [
                 p.id,
                 landlordId,
@@ -3374,8 +3374,7 @@ app.post('/api/sync/payments', authenticateToken, async (req, res) => {
                 p.reference || '',
                 p.paidAt || new Date().toISOString(),
                 p.createdAt || new Date().toISOString(),
-                p.status || 'paid',
-                landlordId // for WHERE clause in UPDATE
+                p.status || 'paid'
             ]
         );
 

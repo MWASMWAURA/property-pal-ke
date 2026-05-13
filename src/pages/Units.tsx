@@ -114,7 +114,7 @@ const Units = () => {
                       <Trash2 className="size-3" />
                     </Button>
                   </AlertDialogTrigger>
-                  <AlertDialogContent>
+                  <AlertDialogContent className="w-full max-w-sm sm:max-w-md">
                     <AlertDialogHeader>
                       <AlertDialogTitle>Delete unit</AlertDialogTitle>
                       <AlertDialogDescription>

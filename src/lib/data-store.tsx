@@ -399,7 +399,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         // Ensure properties have unitNames and normalize units/occupied
         const propertiesWithUnitNames = serverProperties.map((p: any) => {
           const unitsArray = Array.isArray(p.units) ? p.units : [];
-          const unitsCount = Array.isArray(p.units) ? p.units.length : (p.units || 0);
+            const unitsCount = Array.isArray(p.units) ? p.units.length : (parseInt(p.units) || 0);
           return {
             ...p,
             units: unitsCount,
@@ -431,7 +431,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
           // Ensure properties have unitNames and normalize units/occupied
           const propertiesWithUnitNames = (s.properties ?? []).map((p: any) => {
             const unitsArray = Array.isArray(p.units) ? p.units : [];
-            const unitsCount = Array.isArray(p.units) ? p.units.length : (p.units || 0);
+          const unitsCount = Array.isArray(p.units) ? p.units.length : (parseInt(p.units) || 0);
             return {
               ...p,
               units: unitsCount,
