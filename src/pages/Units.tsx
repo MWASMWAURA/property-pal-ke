@@ -33,7 +33,13 @@ const Units = () => {
 
   const propertyTenants = tenants.filter(t => t.property === property.name);
   const occupiedCount = propertyTenants.length;
-  const vacantCount = property.units - occupiedCount;
+  const tenantUnits = new Set(propertyTenants.map(t => t.unit));
+  const unitsCount = Math.max(
+    property.units,
+    property.unitNames?.length || 0,
+    tenantUnits.size
+  );
+  const vacantCount = unitsCount - occupiedCount;
 
   // Use specific unit names if available, otherwise fall back to generic vacant units
   const occupiedUnits = propertyTenants.map(t => t.unit);

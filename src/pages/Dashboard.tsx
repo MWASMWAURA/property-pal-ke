@@ -16,7 +16,11 @@ const Dashboard = () => {
 
   const overdueTenants = tenants.filter(t => t.status === "overdue");
   const overdueAmount = overdueTenants.reduce((s, t) => s + t.rent, 0);
-  const totalUnits = properties.reduce((s, p) => s + p.units, 0);
+  const totalUnits = properties.reduce((s, p) => {
+    const tenantUnits = new Set(tenants.filter(t => t.property === p.name).map(t => t.unit));
+    const unitsCount = Math.max(p.units, tenantUnits.size);
+    return s + unitsCount;
+  }, 0);
   const occupiedUnits = tenants.length;
   const vacantUnits = totalUnits - occupiedUnits;
   const urgentMaint = maintenance.filter(m => m.status !== "resolved").length;
@@ -211,8 +215,8 @@ const Dashboard = () => {
               </div>
               <h3 className="font-bold text-xl mb-1">Bulk Reminders</h3>
               <p className="text-sm opacity-80 mb-4">Send rent reminders to all overdue tenants in one tap.</p>
-              <Button className="bg-white text-primary hover:bg-white/90 font-semibold w-full">
-                <Send className="size-4"/> Send to {overdueTenants.length} overdue
+              <Button className="bg-white text-primary hover:bg-white/90 font-semibold w-full disabled:bg-white/50 disabled:text-primary/70 disabled:cursor-not-allowed touch-manipulation min-h-[44px]" disabled={overdueTenants.length === 0}>
+                <Send className="size-4"/> Send to {overdueTenants.length} overdue feature in version 1.4
               </Button>
             </div>
           </Card>

@@ -29,7 +29,12 @@ const Properties = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {properties.map(p => {
             const occupied = tenants.filter(t => t.property === p.name).length;
-            const unitsCount = typeof p.units === 'number' ? p.units : p.unitNames?.length || 0;
+            const tenantUnits = new Set(tenants.filter(t => t.property === p.name).map(t => t.unit));
+            const unitsCount = Math.max(
+              typeof p.units === 'number' ? p.units : 0,
+              p.unitNames?.length || 0,
+              tenantUnits.size
+            );
             const occ = unitsCount ? (occupied / unitsCount) * 100 : 0;
             const vacant = unitsCount - occupied;
             return (

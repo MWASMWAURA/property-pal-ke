@@ -3540,6 +3540,27 @@ app.post('/api/sync/tenants', authenticateToken, async (req, res) => {
     }
 });
 
+// Delete tenant from server
+app.post('/api/sync/tenants/delete', authenticateToken, async (req, res) => {
+    try {
+        const { id } = req.body;
+        const landlordId = req.landlord.id;
+
+        if (!id) {
+            return res.status(400).json({ error: 'id required' });
+        }
+
+        // Delete from database
+        await query('DELETE FROM tenants WHERE id = $1 AND landlord_id = $2', [id, landlordId]);
+
+        console.log(`[SYNC] Tenant deleted for landlord ${landlordId}: ${id}`);
+        res.json({ ok: true });
+    } catch (error) {
+        console.error('Tenant delete error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Upsert payment from React app - updates BOTH memory and SQLite
 app.post('/api/sync/payments', async (req, res) => {
     try {

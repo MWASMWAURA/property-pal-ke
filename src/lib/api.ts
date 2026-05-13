@@ -34,6 +34,9 @@ export const api = {
   // Sync tenant to server whenever added
   syncTenant: (tenant: object) => post('/api/sync/tenants', tenant),
 
+  // Delete tenant from server
+  deleteTenant: (tenantId: string) => post('/api/sync/tenants/delete', { id: tenantId }),
+
   // Sync payment to server + triggers real WhatsApp receipt
   syncPayment: (payment: object) => post('/api/sync/payments', payment),
 

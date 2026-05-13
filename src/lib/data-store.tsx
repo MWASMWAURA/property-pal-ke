@@ -779,6 +779,11 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     if (property) {
       updateProperty(property.id, { occupied: Math.max(0, property.occupied - 1) });
     }
+
+    // Sync delete to server
+    if (isAuthenticated && isOnline) {
+      api.deleteTenant(id).catch(e => console.warn('Tenant delete sync failed, tenant removed locally:', e));
+    }
   };
 
   const deleteUnit: Ctx["deleteUnit"] = (propertyId, unitName) => {
