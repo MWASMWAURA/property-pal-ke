@@ -216,8 +216,11 @@ const Dashboard = () => {
               <h3 className="font-bold text-xl mb-1">Bulk Reminders</h3>
               <p className="text-sm opacity-80 mb-4">Send rent reminders to all overdue tenants in one tap.</p>
               <Button className="bg-white text-primary hover:bg-white/90 font-semibold w-full disabled:bg-white/50 disabled:text-primary/70 disabled:cursor-not-allowed touch-manipulation min-h-[44px]" disabled={overdueTenants.length === 0}>
-                <Send className="size-4"/> Send to {overdueTenants.length} overdue feature in version 1.4
+                <Send className="size-4"/> Feature in version 1.4+
               </Button>
+              {/* <Button className="bg-white text-primary hover:bg-white/90 font-semibold w-full disabled:bg-white/50 disabled:text-primary/70 disabled:cursor-not-allowed touch-manipulation min-h-[44px]" disabled={overdueTenants.length === 0}>
+                <Send className="size-4"/> Send to {overdueTenants.length} overdue
+              </Button> */}
             </div>
           </Card>
 

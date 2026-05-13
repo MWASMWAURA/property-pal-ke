@@ -62,9 +62,13 @@ const Collections = () => {
         );
       });
       toast({
-        title: "Bulk reminder sent via WhatsApp",
-        description: `${overdueT.length} tenants notified.`
+        title: "Bulk reminder feature in version 1.4+",
+        description: `Contact support for customized tenant notification.`
       });
+      // toast({
+      //   title: "Bulk reminder sent via WhatsApp",
+      //   description: `${overdueT.length} tenants notified.`
+      // });
     } catch {
       toast({
         title: "Server offline",
