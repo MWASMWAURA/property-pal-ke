@@ -31,6 +31,11 @@ const AppRoutes = () => {
   const { isAuthenticated, isLoading, logout, profile } = useData();
   const isStandalone = useStandaloneMode();
 
+  if (location.pathname === '/reset-password') {
+    return <ResetPassword />;
+  }
+
+
   // Show loading while checking authentication
   if (isLoading) {
     return (

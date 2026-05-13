@@ -31,7 +31,16 @@ const parseCsv = (text: string): { headers: string[]; rows: string[][] } => {
     let cur = ""; let inQ = false;
     for (let i = 0; i < l.length; i++) {
       const ch = l[i];
-      if (ch === '"') { inQ = !inQ; continue; }
+      if (ch === '"') {
+        if (inQ && i + 1 < l.length && l[i + 1] === '"') {
+          // Escaped quote
+          cur += '"';
+          i++; // Skip next quote
+        } else {
+          inQ = !inQ;
+        }
+        continue;
+      }
       if (ch === "," && !inQ) { out.push(cur); cur = ""; continue; }
       cur += ch;
     }
@@ -43,30 +52,31 @@ const parseCsv = (text: string): { headers: string[]; rows: string[][] } => {
   return { headers, rows };
 };
 
-const guessMapping = (headers: string[]): Record<FieldKey, string> => {
-  const map = {} as Record<FieldKey, string>;
-  const lc = headers.map(h => h.toLowerCase());
-  const find = (...needles: string[]) => {
-    for (const n of needles) {
-      const i = lc.findIndex(h => h.includes(n));
-      if (i >= 0) return headers[i];
-    }
-    return "";
+  const guessMapping = (headers: string[]): Record<FieldKey, string> => {
+    const map = {} as Record<FieldKey, string>;
+    const lc = headers.map(h => h.toLowerCase());
+    const find = (...needles: string[]) => {
+      for (const n of needles) {
+        const i = lc.findIndex(h => h.includes(n));
+        if (i >= 0) return headers[i];
+      }
+      return "";
+    };
+    map.name = find("name", "tenant", "full name", "fullname");
+    map.phone = find("phone", "mobile", "msisdn", "contact");
+    map.property = find("property", "building", "estate", "location");
+    map.unit = find("unit", "house", "apt", "apartment", "room");
+    map.rent = find("rent", "amount", "monthly rent", "monthly");
+    map.status = find("status", "state");
+    map.method = find("method", "payment", "pay method");
+    map.dueDate = find("due", "deadline", "due date");
+    map.leaseEnd = find("lease", "end", "expiry", "lease end");
+    return map;
   };
-  map.name = find("name", "tenant");
-  map.phone = find("phone", "mobile", "msisdn");
-  map.property = find("property", "building", "estate");
-  map.unit = find("unit", "house", "apt");
-  map.rent = find("rent", "amount");
-  map.status = find("status");
-  map.method = find("method", "payment");
-  map.dueDate = find("due", "deadline");
-  map.leaseEnd = find("lease", "end", "expiry");
-  return map;
-};
 
 export const BulkImportDialog = ({ trigger, open: controlledOpen, onOpenChange }: { trigger: React.ReactNode; open?: boolean; onOpenChange?: (open: boolean) => void }) => {
   const { addTenantsBulk, properties } = useData();
+  const propertyNames = properties.map(p => p.name);
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
   const setOpen = onOpenChange || setInternalOpen;
@@ -114,7 +124,7 @@ export const BulkImportDialog = ({ trigger, open: controlledOpen, onOpenChange }
     });
   }, [step, rows, headers, mapping]);
 
-  const validRows = mapped.filter(r => r.name && r.unit && r.property && r.rent > 0);
+  const validRows = mapped.filter(r => r.name && r.unit && r.property && r.rent > 0 && propertyNames.includes(r.property));
   const invalidCount = mapped.length - validRows.length;
 
   const requiredOk = REQUIRED_FIELDS.filter(f => f.required).every(f => mapping[f.key]);
@@ -166,6 +176,7 @@ export const BulkImportDialog = ({ trigger, open: controlledOpen, onOpenChange }
           <div className="space-y-3">
             <div className="text-xs text-muted-foreground">
               Detected {headers.length} columns and {rows.length} rows in <span className="font-mono">{filename}</span>.
+              Ensure properties exist before importing.
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {REQUIRED_FIELDS.map(f => (
@@ -215,6 +226,9 @@ export const BulkImportDialog = ({ trigger, open: controlledOpen, onOpenChange }
             </div>
             {properties.length === 0 && (
               <p className="text-xs text-warning">Tip: add the matching properties first so they appear in dashboards.</p>
+            )}
+            {mapped.length > 0 && validRows.length < mapped.length && (
+              <p className="text-xs text-destructive">Some rows are invalid: check for missing required fields or non-existent properties.</p>
             )}
           </div>
         )}

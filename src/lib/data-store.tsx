@@ -711,6 +711,34 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     const mapped = rows.map(r => ({ ...r, id: uid("t") } as Tenant));
     setTenants(prev => [...mapped, ...prev]);
 
+    // Update property occupancy and unitNames
+    const propertyUpdates = new Map<string, { occupied: number; unitNames: string[]; units: number }>();
+    mapped.forEach(t => {
+      const property = properties.find(p => p.name === t.property);
+      if (!property) return;
+      const key = property.id;
+      if (!propertyUpdates.has(key)) {
+        propertyUpdates.set(key, { occupied: property.occupied, unitNames: [...property.unitNames], units: property.units });
+      }
+      const updates = propertyUpdates.get(key)!;
+      updates.occupied += 1;
+      if (!updates.unitNames.includes(t.unit)) {
+        // Find vacant unit names
+        const occupiedUnits = tenants.filter(tn => tn.property === t.property).map(tn => tn.unit);
+        const vacantUnitNames = updates.unitNames.filter(name => !occupiedUnits.includes(name));
+        if (vacantUnitNames.length > 0) {
+          const indexToReplace = updates.unitNames.indexOf(vacantUnitNames[0]);
+          updates.unitNames[indexToReplace] = t.unit;
+        } else {
+          updates.unitNames.push(t.unit);
+          updates.units += 1;
+        }
+      }
+    });
+    propertyUpdates.forEach((updates, propId) => {
+      updateProperty(propId, updates);
+    });
+
     // Sync all tenants to server so WhatsApp bot can look up by phone
     mapped.forEach(tenant => {
       api.syncTenant(tenant).catch(e => console.warn('Tenant sync failed', e));
