@@ -158,7 +158,7 @@ const SYNC_QUEUE_KEY = "propertyhub:sync-queue:v1";
 type SyncOperation = {
   id: string;
   type: 'property' | 'tenant' | 'payment' | 'complaint';
-  action: 'create' | 'update';
+  action: 'create' | 'update' | 'delete';
   data: any;
   timestamp: number;
   retries: number;
@@ -321,7 +321,11 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             await api.syncProperty(operation.data);
             break;
           case 'tenant':
-            await api.syncTenant(operation.data);
+            if (operation.action === 'delete') {
+              await api.deleteTenant(operation.data.id);
+            } else {
+              await api.syncTenant(operation.data);
+            }
             break;
           case 'payment':
             await api.syncPayment(operation.data);
@@ -808,9 +812,22 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       updateProperty(property.id, { occupied: Math.max(0, property.occupied - 1) });
     }
 
-    // Sync delete to server
-    if (isAuthenticated && isOnline) {
-      api.deleteTenant(id).catch(e => console.warn('Tenant delete sync failed, tenant removed locally:', e));
+    // Queue delete to sync later (offline/unauthenticated friendly)
+    console.log('[TENANT DELETE] deleteTenant called', { id, isAuthenticated, isOnline });
+
+    addToSyncQueue({
+      type: 'tenant',
+      action: 'delete',
+      data: { id },
+    });
+
+    // Try to sync immediately if online
+    if (isOnline && isAuthenticated) {
+      api.deleteTenant(id)
+        .then(r => console.log('[TENANT DELETE] sync response', r))
+        .catch(e => console.warn('Tenant delete sync failed, will retry via queue:', e));
+    } else {
+      console.warn('[TENANT DELETE] queued delete (offline or unauthenticated)');
     }
   };
 
