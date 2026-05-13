@@ -10,7 +10,7 @@ const Properties = () => {
   const navigate = useNavigate();
   const { properties, tenants } = useData();
   return (
-    <AppShell title="Properties" subtitle={`${properties.length} buildings · ${properties.reduce((s,p)=>s+p.units,0)} total units`}>
+    <AppShell title="Properties" subtitle={`${properties.length} buildings · ${properties.reduce((s,p)=>s + (typeof p.units === 'number' ? p.units : p.unitNames?.length || 0),0)} total units`}>
       <div className="flex justify-end mb-4">
         <AddPropertyDialog
           trigger={
@@ -29,8 +29,9 @@ const Properties = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {properties.map(p => {
             const occupied = tenants.filter(t => t.property === p.name).length;
-            const occ = p.units ? (occupied / p.units) * 100 : 0;
-            const vacant = p.units - occupied;
+            const unitsCount = typeof p.units === 'number' ? p.units : p.unitNames?.length || 0;
+            const occ = unitsCount ? (occupied / unitsCount) * 100 : 0;
+            const vacant = unitsCount - occupied;
             return (
               <Card key={p.id} className="overflow-hidden shadow-card border-border/60 group hover:shadow-card-lg transition-all">
                 <div className="h-32 gradient-hero relative">
@@ -47,7 +48,7 @@ const Properties = () => {
                   <h3 className="font-bold text-lg">{p.name}</h3>
                   <p className="text-xs text-muted-foreground flex items-center gap-1 mb-4"><MapPin className="size-3"/>{p.location}</p>
                    <div className="grid grid-cols-3 gap-2 text-center mb-4">
-                     <Stat label="Total" value={p.units}/>
+                      <Stat label="Total" value={unitsCount}/>
                      <Stat label="Occupied" value={occupied} accent="text-success"/>
                      <Stat label="Vacant" value={vacant} accent={vacant ? "text-destructive" : "text-muted-foreground"}/>
                    </div>
