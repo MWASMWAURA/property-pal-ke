@@ -396,11 +396,17 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
           payments: serverPayments.length
         });
 
-        // Ensure properties have unitNames
-        const propertiesWithUnitNames = serverProperties.map((p: any) => ({
-          ...p,
-          unitNames: p.unitNames || Array.from({ length: p.units }, (_, i) => `Unit ${i + 1}`)
-        }));
+        // Ensure properties have unitNames and normalize units/occupied
+        const propertiesWithUnitNames = serverProperties.map((p: any) => {
+          const unitsArray = Array.isArray(p.units) ? p.units : [];
+          const unitsCount = Array.isArray(p.units) ? p.units.length : (p.units || 0);
+          return {
+            ...p,
+            units: unitsCount,
+            occupied: Array.isArray(p.units) ? p.units.filter((u: any) => u.status === 'occupied').length : (p.occupied || 0),
+            unitNames: p.unitNames || unitsArray.map((u: any, i: number) => u.name || `Unit ${i + 1}`),
+          };
+        });
 
         setProperties(propertiesWithUnitNames);
         setTenants(serverTenants);
@@ -422,11 +428,17 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         const raw = localStorage.getItem(KEY);
         if (raw) {
           const s = JSON.parse(raw);
-          // Ensure properties have unitNames
-          const propertiesWithUnitNames = (s.properties ?? []).map((p: any) => ({
-            ...p,
-            unitNames: p.unitNames || Array.from({ length: p.units }, (_, i) => `Unit ${i + 1}`)
-          }));
+          // Ensure properties have unitNames and normalize units/occupied
+          const propertiesWithUnitNames = (s.properties ?? []).map((p: any) => {
+            const unitsArray = Array.isArray(p.units) ? p.units : [];
+            const unitsCount = Array.isArray(p.units) ? p.units.length : (p.units || 0);
+            return {
+              ...p,
+              units: unitsCount,
+              occupied: Array.isArray(p.units) ? p.units.filter((u: any) => u.status === 'occupied').length : (p.occupied || 0),
+              unitNames: p.unitNames || unitsArray.map((u: any, i: number) => u.name || `Unit ${i + 1}`),
+            };
+          });
           setProperties(propertiesWithUnitNames);
           setTenants(s.tenants ?? []);
           setPayments(s.payments ?? []);

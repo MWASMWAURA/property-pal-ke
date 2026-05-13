@@ -726,7 +726,9 @@ const normalizeTenantRow = (row) => ({
   ...row,
   rent: row.rent != null ? Number(row.rent) : row.rent,
   assignedUnit: loadJson(row.assigned_unit, null),
-  createdAt: row.created_at
+  createdAt: row.created_at,
+  dueDate: row.due_date,
+  leaseEnd: row.lease_end
 });
 
 const normalizePaymentRow = (row) => ({
