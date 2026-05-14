@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,9 +19,17 @@ const parseDMY = (s: string) => {
 
 const Tenants = () => {
   const { tenants, properties } = useData();
+  const [searchParams] = useSearchParams();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"all" | "paid" | "pending" | "overdue">("all");
   const [expiry, setExpiry] = useState<0 | 30 | 60 | 90>(0);
+
+  useEffect(() => {
+    const filter = searchParams.get("filter");
+    if (filter === "overdue") {
+      setStatus("overdue");
+    }
+  }, [searchParams]);
 
   const filtered = useMemo(() => {
     const now = new Date();

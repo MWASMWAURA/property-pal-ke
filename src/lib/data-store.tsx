@@ -83,6 +83,7 @@ export type LandlordProfile = {
   city: string;
   preferredChannel: "whatsapp" | "sms" | "email";
   collectionMonthStart: number;
+  overdueDays?: number; // number of days after due date before marking overdue
 };
 
 type Ctx = {
@@ -683,7 +684,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       // Check if this unit name already exists
       if (!property.unitNames.includes(t.unit)) {
         // Find vacant unit names (unitNames that don't have tenants)
-        const occupiedUnits = tenants.filter(tn => tn.property === t.property).map(tn => tn.unit);
+        const occupiedUnits = [...tenants, tenant].filter(tn => tn.property === t.property).map(tn => tn.unit);
         const vacantUnitNames = property.unitNames.filter(name => !occupiedUnits.includes(name));
 
         if (vacantUnitNames.length > 0) {
@@ -728,7 +729,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       updates.occupied += 1;
       if (!updates.unitNames.includes(t.unit)) {
         // Find vacant unit names
-        const occupiedUnits = tenants.filter(tn => tn.property === t.property).map(tn => tn.unit);
+        const occupiedUnits = Array.from(occupiedMap.get(t.property) || []).concat([]);
         const vacantUnitNames = updates.unitNames.filter(name => !occupiedUnits.includes(name));
         if (vacantUnitNames.length > 0) {
           const indexToReplace = updates.unitNames.indexOf(vacantUnitNames[0]);
@@ -795,6 +796,33 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       return t;
     }));
   };
+
+  // Daily overdue sweep: mark pending tenants overdue if past their dueDate + profile.overdueDays
+  useEffect(() => {
+    if (mode === 'unset') return;
+
+    const sweepOverdues = () => {
+      const overdueDays = profile?.overdueDays ?? 5; // default to 5 days
+      const now = Date.now();
+      tenants.forEach(t => {
+        if (t.status !== 'pending') return;
+        // Assume tenant.dueDate is dd/mm/yyyy
+        const m = t.dueDate?.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (!m) return;
+        const due = new Date(+m[3], +m[2] - 1, +m[1]);
+        if (now > due.getTime() + overdueDays * 86400000) {
+          // mark overdue
+          updateTenant(t.id, { status: 'overdue' });
+        }
+      });
+    };
+
+    // Run immediately on mount
+    sweepOverdues();
+    // Schedule once a day
+    const id = setInterval(sweepOverdues, 24 * 60 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [mode, tenants, profile, updateTenant]);
 
   const deleteTenant: Ctx["deleteTenant"] = (id) => {
     const tenant = tenants.find(t => t.id === id);

@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { useState, useMemo } from "react";
 import { TrendingUp, TrendingDown, AlertTriangle, Home, CalendarClock, Wrench, ArrowUpRight, MessageCircle, Send, Download, Sparkles, RefreshCw } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
 import { Card } from "@/components/ui/card";
@@ -12,23 +13,109 @@ import { cn } from "@/lib/utils";
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const { tenants, properties, maintenance, revenueByMonth, collectionDonut, mode, startTour, resetToOwnData, leaseFilterDays, setLeaseFilterDays, expiringTenants, profile } = useData();
+  const { tenants, properties, maintenance, payments, revenueByMonth, collectionDonut, mode, startTour, resetToOwnData, leaseFilterDays, setLeaseFilterDays, expiringTenants, profile, updateTenant } = useData();
+  const [selectedProperty, setSelectedProperty] = useState<string | null>(null);
 
-  const overdueTenants = tenants.filter(t => t.status === "overdue");
+  // Derived filtered tenants & metrics when property selected
+  const filteredTenants = useMemo(() => selectedProperty ? tenants.filter(t => t.property === selectedProperty) : tenants, [tenants, selectedProperty]);
+  const overdueTenants = filteredTenants.filter(t => t.status === "overdue");
   const overdueAmount = overdueTenants.reduce((s, t) => s + t.rent, 0);
-  const totalUnits = properties.reduce((s, p) => {
-    const tenantUnits = new Set(tenants.filter(t => t.property === p.name).map(t => t.unit));
-    const unitsCount = Math.max(p.units, tenantUnits.size);
-    return s + unitsCount;
-  }, 0);
-  const occupiedUnits = tenants.length;
-  const vacantUnits = totalUnits - occupiedUnits;
+
+  // Total units: when a property is selected, use that property's units calculation; otherwise sum all property.units
+  const totalUnits = useMemo(() => {
+    if (selectedProperty) {
+      const p = properties.find(x => x.name === selectedProperty);
+      if (!p) return 0;
+      const propertyTenants = tenants.filter(t => t.property === p.name);
+      const tenantUnits = new Set(propertyTenants.map(t => t.unit));
+      return Math.max(p.units, p.unitNames?.length || 0, tenantUnits.size);
+    }
+    // include tenants' properties even if property record is missing
+    const allPropertyNames = new Set<string>([...properties.map(p => p.name), ...tenants.map(t => t.property)]);
+    let sum = 0;
+    allPropertyNames.forEach(name => {
+      const p = properties.find(x => x.name === name);
+      const propertyTenants = tenants.filter(t => t.property === name);
+      const tenantUnits = new Set(propertyTenants.map(t => t.unit));
+      const unitNamesLen = p?.unitNames?.length || 0;
+      const unitsCount = Math.max(p?.units || 0, unitNamesLen, tenantUnits.size);
+      sum += unitsCount;
+    });
+    return sum;
+  }, [selectedProperty, properties, tenants]);
+
+  const occupiedUnits = filteredTenants.length;
+  const vacantUnits = Math.max(0, totalUnits - occupiedUnits);
   const urgentMaint = maintenance.filter(m => m.status !== "resolved").length;
   const expiring = expiringTenants();
   const expiringLeases = expiring.length;
-  const collectedTotal = collectionDonut.reduce((s, d) => s + d.value, 0);
-  const collected = collectionDonut.find(d => d.name === "Collected")?.value ?? 0;
+
+  // Compute collection donut and revenue by month filtered by property when required
+  const computeCollectionDonut = () => {
+    const sourceTenants = filteredTenants;
+    const acc = [
+      { name: "Collected", value: 0, color: "hsl(var(--success))" },
+      { name: "Pending", value: 0, color: "hsl(var(--warning))" },
+      { name: "Overdue", value: 0, color: "hsl(var(--destructive))" },
+    ];
+
+    sourceTenants.forEach(tenant => {
+      const tenantPayments = payments.filter(p => p.tenantId === tenant.id && p.status === "paid");
+      const totalPaid = tenantPayments.reduce((sum, p) => sum + p.amount, 0);
+      const outstanding = Math.max(0, tenant.rent - totalPaid);
+      acc[0].value += totalPaid;
+      if (outstanding > 0) {
+        if (tenant.status === "overdue") acc[2].value += outstanding; else acc[1].value += outstanding;
+      }
+    });
+    return acc;
+  };
+
+  const collectionDonutFiltered = computeCollectionDonut();
+  const collectedTotal = collectionDonutFiltered.reduce((s, d) => s + d.value, 0);
+  const collected = collectionDonutFiltered.find(d => d.name === "Collected")?.value ?? 0;
   const rate = collectedTotal > 0 ? (collected / collectedTotal) * 100 : 0;
+
+  const computeRevenueByMonth = () => {
+    const monthStart = profile?.collectionMonthStart || 1;
+    const revenueMap = new Map<string, { collected: number; pending: number }>();
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthKey = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      revenueMap.set(monthKey, { collected: 0, pending: 0 });
+    }
+
+    // consider only payments for tenants in filteredTenants when property selected
+    const tenantIds = new Set(filteredTenants.map(t => t.id));
+    payments.filter(p => p.status === 'paid' && tenantIds.has(p.tenantId)).forEach(payment => {
+      const paymentDate = new Date(payment.paidAt);
+      const paymentYear = paymentDate.getFullYear();
+      const paymentMonth = paymentDate.getMonth();
+      const paymentDay = paymentDate.getDate();
+      let collectionMonth = paymentMonth;
+      let collectionYear = paymentYear;
+      if (paymentDay < monthStart) {
+        collectionMonth = paymentMonth - 1;
+        if (collectionMonth < 0) { collectionMonth = 11; collectionYear = paymentYear - 1; }
+      }
+      const monthKey = new Date(collectionYear, collectionMonth).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      if (revenueMap.has(monthKey)) revenueMap.get(monthKey)!.collected += payment.amount;
+    });
+
+    const totalMonthlyRent = filteredTenants.reduce((sum, t) => sum + t.rent, 0);
+    revenueMap.forEach((data, monthKey) => {
+      const [monthName, yearStr] = monthKey.split(' ');
+      const monthDate = new Date(`${monthName} 1, ${yearStr}`);
+      const isCurrentOrFuture = monthDate >= new Date(now.getFullYear(), now.getMonth(), 1);
+      if (isCurrentOrFuture) data.pending = Math.max(0, totalMonthlyRent - data.collected); else data.pending = 0;
+    });
+
+    return Array.from(revenueMap.entries()).map(([month, data]) => ({ month, collected: data.collected, pending: data.pending }))
+      .sort((a, b) => new Date(a.month).getTime() - new Date(b.month).getTime());
+  };
+
+  const revenueByMonthFiltered = selectedProperty ? computeRevenueByMonth() : revenueByMonth;
 
   return (
     <AppShell
@@ -59,7 +146,7 @@ const Dashboard = () => {
           label="Overdue"
           value={formatKsh(overdueAmount)}
           sub={`${overdueTenants.length} tenants behind`}
-          action={<Button size="sm" variant="secondary" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur touch-manipulation min-h-[44px] px-3 sm:px-4"><MessageCircle className="size-4 sm:size-3.5"/> <span className="hidden xs:inline">Chase via WhatsApp</span><span className="xs:hidden">Chase</span></Button>}
+          action={<Button size="sm" variant="secondary" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur touch-manipulation min-h-[44px] px-3 sm:px-4" onClick={() => navigate('/tenants?filter=overdue')}><MessageCircle className="size-4 sm:size-3.5"/> <span className="hidden xs:inline">Chase via WhatsApp</span><span className="xs:hidden">Chase</span></Button>}
         />
         <KpiCard
           icon={<Home className="size-5" />}
@@ -108,8 +195,14 @@ const Dashboard = () => {
               </div>
             </div>
           </div>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart key={revenueByMonth.map(d => `${d.month}-${d.collected}-${d.pending}`).join('|')} data={revenueByMonth} barGap={4}>
+          <div className="flex items-center gap-3 justify-end mb-3">
+                <select value={selectedProperty ?? ""} onChange={e => setSelectedProperty(e.target.value || null)} className="text-xs bg-muted/60 border border-border rounded px-2 py-1 font-semibold cursor-pointer">
+                  <option value="">All properties</option>
+                  {properties.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                </select>
+              </div>
+              <ResponsiveContainer width="100%" height={240}>
+            <BarChart key={revenueByMonthFiltered.map(d => `${d.month}-${d.collected}-${d.pending}`).join('|')} data={revenueByMonthFiltered} barGap={4}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false}/>
               <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} axisLine={false} tickLine={false}/>
               <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} axisLine={false} tickLine={false} tickFormatter={(v)=>`${(v/1000000).toFixed(1)}M`}/>
@@ -134,8 +227,8 @@ const Dashboard = () => {
           <div className="relative mx-auto w-full" style={{ maxWidth: 180, height: 140 }}>
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={collectionDonut} dataKey="value" innerRadius={48} outerRadius={66} paddingAngle={3} stroke="none">
-                  {collectionDonut.map((d) => <Cell key={d.name} fill={d.color}/>)}
+                <Pie data={collectionDonutFiltered} dataKey="value" innerRadius={48} outerRadius={66} paddingAngle={3} stroke="none">
+                  {collectionDonutFiltered.map((d) => <Cell key={d.name} fill={d.color}/>)}
                 </Pie>
               </PieChart>
             </ResponsiveContainer>
@@ -145,7 +238,7 @@ const Dashboard = () => {
             </div>
           </div>
           <div className="space-y-1.5 mt-3">
-            {collectionDonut.map(d => (
+            {collectionDonutFiltered.map(d => (
               <div key={d.name} className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2"><span className="size-2 rounded-full" style={{background: d.color}}/>{d.name}</div>
                 <span className="font-mono-num font-semibold">{formatKsh(d.value)}</span>
@@ -168,7 +261,7 @@ const Dashboard = () => {
             </Link>
           </div>
           <div className="overflow-x-auto">
-            {tenants.length === 0 ? (
+            {filteredTenants.length === 0 ? (
               <div className="p-10 text-center text-sm text-muted-foreground">
                 No tenants yet — add your first tenant to start tracking collections.
               </div>
@@ -184,7 +277,7 @@ const Dashboard = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {tenants.slice(0,6).map(t => (
+                  {filteredTenants.slice(0,6).map(t => (
                     <tr key={t.id} className="border-t border-border hover:bg-muted/30 transition-colors">
                       <td className="px-5 py-3.5">
                         <div className="font-semibold">{t.name}</div>

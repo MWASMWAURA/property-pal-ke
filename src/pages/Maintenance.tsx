@@ -9,7 +9,7 @@ import { RecordComplaintDialog } from "@/components/dialogs/RecordComplaintDialo
 import { toast } from "@/hooks/use-toast";
 
 const Maintenance = () => {
-  const { maintenance, complaints, updateComplaintStatus, updateMaintenanceStatus } = useData();
+  const { maintenance, complaints, updateComplaintStatus, updateMaintenanceStatus, tenants } = useData();
   const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
 
   // Merge demo maintenance + recorded complaints
@@ -18,9 +18,10 @@ const Maintenance = () => {
       id: m.id, tenantName: m.tenant, unit: m.unit, category: m.category,
       description: m.description, priority: m.priority, status: m.status,
       created: m.created, source: "tenant" as const, type: "maintenance" as const,
+      property: tenants.find(t => t.name === m.tenant && t.unit === m.unit)?.property ?? "—",
     })),
     ...complaints.map(c => ({
-      id: c.id, tenantName: c.tenantName, unit: c.unit, category: c.category,
+      id: c.id, tenantName: c.tenantName, unit: c.unit, property: c.property, category: c.category,
       description: c.description, priority: c.priority, status: c.status,
       created: new Date(c.createdAt).toLocaleDateString("en-KE"), source: c.source, type: "complaint" as const,
     })),
@@ -53,7 +54,7 @@ const Maintenance = () => {
                       <div className="size-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center"><Wrench className="size-4" /></div>
                       <div>
                         <div className="font-semibold text-sm">{m.category}</div>
-                        <div className="text-xs text-muted-foreground">Unit {m.unit}</div>
+                        <div className="text-xs text-muted-foreground">{m.unit} · {m.property}</div>
                       </div>
                     </div>
                     <StatusPill status={m.priority} />
